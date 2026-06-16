@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test agent/loop.test.ts"
+    "test": "node --test agent/loop.test.ts engine/node-llama-map.test.ts"
   },
   "dependencies": {
     "node-llama-cpp": "^3",

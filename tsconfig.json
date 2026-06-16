@@ -18,5 +18,5 @@
     "noUnusedParameters": true,
     "types": ["node"]
   },
-  "include": ["agent", "engine"]
+  "include": ["agent", "engine", "driver"]
 }
