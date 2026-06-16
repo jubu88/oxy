@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test agent/loop.test.ts"
   },
   "dependencies": {
     "node-llama-cpp": "^3",
@@ -15,6 +17,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@types/node": "^24",
     "@vitejs/plugin-react": "^4",
     "typescript": "^5",
     "vite": "^6"

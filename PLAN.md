@@ -5,7 +5,10 @@ scaffold defines the architecture (`engine/engine.ts`) and the north star
 (**simple, beautiful, just works, one-command install**). The build-out below is
 best done in a dedicated Claude Code session rooted in this folder.
 
-## Source to port (from reasoning-lab/code-lab)
+## Source to port (from reasoning-lab)
+> Paths: the agent + UI live at the **reasoning-lab root** (`src/lib/codeagent.ts`,
+> `src/components/CodeLabView.tsx`, `src/api/ollama.ts`); only the backend +
+> headless driver are under `code-lab/` (`server.mjs`, `run-build.mjs`).
 - `server.mjs` — the jailed backend (per-project workspace, safePath/checkExt,
   write/edit/read/list, zip export, SSRF-guarded web fetch/search, SD image gen,
   Playwright screenshot + vision critique, Stitch MCP client, **the `.codelab`
@@ -17,9 +20,13 @@ best done in a dedicated Claude Code session rooted in this folder.
 - `code-lab/run-build.mjs` — headless driver, useful for end-to-end testing.
 
 ## Phases
-1. **Engine-agnostic agent core.** Lift the loop out of `codeagent.ts` into
-   `agent/` so it depends only on `Engine` (engine/engine.ts). Compaction, burst,
-   token accounting, tool execution all live here. Keep history in `ChatMessage[]`.
+1. **Engine-agnostic agent core.** ✅ DONE — see `agent/` (`loop.ts`,
+   `tools.ts`, `executor.ts`, `compaction.ts`, `types.ts`). Depends only on
+   `Engine`; the inline Ollama fetch collapsed into one `engine.generate()` call.
+   Compaction, burst, token accounting live in `loop.ts`; tool execution is
+   pluggable behind `ToolExecutor` (default `HttpToolExecutor` → `/codelab`).
+   Verified by `agent/loop.test.ts` against a FakeEngine — run `npm test` (uses
+   Node 24's built-in TS type-stripping; no install needed).
 2. **node-llama-cpp adapter** (`engine/node-llama.ts`). Use the LOW-LEVEL
    `LlamaChat.generateResponse` (NOT `LlamaChatSession.prompt`, which auto-runs
    tools and would hide the orchestration seam). Map our `ChatMessage[]`/`ToolDef[]`
