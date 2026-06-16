@@ -35,6 +35,19 @@ function stepLabel(s: AgentStep): string {
     .join(", ");
 }
 
+// Prefer a coder/instruct model; never auto-pick a vision/embedding model.
+function pickDefaultModel(models: string[]): string {
+  const isAux = (m: string) => /vl|vision|moondream|embed|clip/i.test(m);
+  return (
+    models.find((m) => /coder/i.test(m) && !isAux(m)) ??
+    models.find((m) => /gemma4?:e4b/i.test(m)) ??
+    models.find((m) => /gemma|qwen|llama|mistral|deepseek/i.test(m) && !isAux(m)) ??
+    models.find((m) => !isAux(m)) ??
+    models[0] ??
+    ""
+  );
+}
+
 function tagsFor(s: AgentStep): Array<{ cls: string; label: string }> {
   const tags: Array<{ cls: string; label: string }> = [];
   if (s.burst) tags.push({ cls: "think", label: "thinking" });
@@ -65,8 +78,7 @@ export function App() {
       .then((s) => {
         setStatus(s);
         if (!s.engines.ollama && s.engines["node-llama"]) setEngine("node-llama");
-        const coder = s.models.find((m) => /coder/i.test(m)) ?? s.models.find((m) => /gemma|qwen|llama/i.test(m)) ?? s.models[0] ?? "";
-        setModel(coder);
+        setModel(pickDefaultModel(s.models));
       })
       .catch(() => setStatus({ engines: { ollama: false, "node-llama": true }, stitch: false, sd: false, models: [] }));
   }, []);
@@ -121,8 +133,7 @@ export function App() {
   function changeEngine(next: string) {
     setEngine(next);
     if (next === "ollama") {
-      const m = status?.models ?? [];
-      setModel(m.find((x) => /coder/i.test(x)) ?? m.find((x) => /gemma|qwen|llama/i.test(x)) ?? m[0] ?? "");
+      setModel(pickDefaultModel(status?.models ?? []));
     } else {
       setModel(""); // node-llama uses its bundled default GGUF unless a HF ref is given
     }

@@ -27,21 +27,21 @@ best done in a dedicated Claude Code session rooted in this folder.
    pluggable behind `ToolExecutor` (default `HttpToolExecutor` → `/codelab`).
    Verified by `agent/loop.test.ts` against a FakeEngine — run `npm test` (uses
    Node 24's built-in TS type-stripping; no install needed).
-2. **node-llama-cpp adapter** (`engine/node-llama.ts`). Use the LOW-LEVEL
-   `LlamaChat.generateResponse` (NOT `LlamaChatSession.prompt`, which auto-runs
-   tools and would hide the orchestration seam). Map our `ChatMessage[]`/`ToolDef[]`
-   in, surface `functionCalls` out without executing, return prompt/eval token
-   counts (for the compaction meter) and the reasoning trace when `think`.
-   `ensureReady()` downloads a small default coder GGUF from HuggingFace on first run.
-3. **Ollama adapter** (`engine/ollama.ts`). Port the existing streaming `/api/chat`
-   integration as an optional adapter behind the same interface.
-4. **UI — design in Stitch, then wire React.** ONE clean flow: a prompt box, a
-   subtle model/engine indicator, live build progress (with the context-pressure +
-   compaction/burst cues), a preview, and export. Minimal. Beautiful. No clutter.
-5. **Model manager (light).** Default model auto-downloads; a small picker to plug
-   in any GGUF by HuggingFace ref. Don't over-build — "just works" first.
-6. **Packaging.** One-command install today (`npm install`); later, a Tauri desktop
-   build for a true double-click app.
+2. **node-llama-cpp adapter** ✅ DONE — `engine/node-llama.ts` (low-level
+   `LlamaChat.generateResponse`, `functionCalls` surfaced un-executed, token
+   counts via the sequence `tokenMeter`, `<think>` split out, `ensureReady()`
+   downloads a default coder GGUF). Pure mappers in `engine/node-llama-map.ts`
+   (7 unit tests). Typechecked; live run needs `npm install` + first-run download.
+3. **Ollama adapter** ✅ DONE — `engine/ollama.ts` (streaming `/api/chat`, native
+   `tool_calls`, reasoning channel, exact token counts). Live-tested vs gemma4:e4b.
+4. **UI — design in Stitch, then wire React.** ✅ DONE — design generated in Stitch
+   (`design/stitch-ui.html`), rebuilt in React (`src/`): prompt box, engine/model
+   picker, context-pressure + compaction/burst cues, sandboxed preview, export.
+   Builds run server-side via `/oxy/api/build` (NDJSON stream).
+5. **Model manager (light).** ✅ DONE — default auto-downloads (node-llama); UI
+   picker switches engine and takes any GGUF by HuggingFace ref / any Ollama model.
+6. **Packaging.** ✅ `npm install` + `npm run dev` (UI) / `npm run oxy` (headless).
+   Later: a Tauri desktop build for a true double-click app.
 
 ## Findings to port from the bench (the orchestration layer)
 - [x] auto-compact (context checkpoint + fresh reseed)
