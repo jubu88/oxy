@@ -22,11 +22,41 @@ export async function getStatus(): Promise<OxyStatus> {
   return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [] };
 }
 
+export interface ProjectInfo {
+  id: string;
+  files: number;
+  hasIndex: boolean;
+  mtime: number;
+}
+
+export async function getProjects(): Promise<ProjectInfo[]> {
+  try {
+    const r = await fetch("/codelab/api/projects");
+    const j = await r.json();
+    return (j.projects ?? []).filter((p: ProjectInfo) => p.hasIndex);
+  } catch {
+    return [];
+  }
+}
+
+/** Save the user's Stitch API key (server writes it to the gitignored key file). */
+export async function saveStitchKey(key: string): Promise<boolean> {
+  const r = await fetch("/oxy/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ stitchApiKey: key }),
+  });
+  const j = await r.json();
+  return !!j.ok;
+}
+
 export interface BuildRequest {
   task: string;
   engine: string;
   model?: string;
   useStitch?: boolean;
+  /** continue/modify an existing project instead of building a new one */
+  project?: string;
 }
 
 /** POST a build and stream NDJSON events back as they happen. */

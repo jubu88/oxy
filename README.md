@@ -49,10 +49,19 @@ npm run oxy      # OXY_TASK="build a ..." OXY_ENGINE=ollama|node-llama OXY_MODEL
 
 ## The interface
 
-The UI was designed in **Google Stitch** (`design/stitch-ui.html`) and rebuilt in
-React: a prompt box, a subtle engine/model picker, a live build timeline that
-surfaces the orchestration (context-pressure meter, `thinking` and `compacted`
-cues), a sandboxed preview, and one-click **Export .zip**. Calm, minimal, light.
+![Oxy](design/screenshot.png)
+
+A futuristic, minimal command deck — designed in **Google Stitch**
+(`design/stitch-ui.html`, regenerate with `node design/gen-stitch.mjs`) and built
+in React over an animated WebGL nebula. It has a prompt box, an engine/model
+picker, a live build timeline that surfaces the orchestration (context-pressure
+meter, `thinking` / `compacted` cues), a sandboxed preview, and one-click
+**Export .zip**.
+
+- **Iterate, don't restart.** Pick an existing project from the switcher and
+  describe a change — the model reads the current files and edits in place.
+- **Bring your own keys.** The Settings panel saves your Stitch API key to a
+  git-ignored file (never committed, never sent back to the browser).
 
 ## Engines
 
@@ -91,6 +100,9 @@ npm run build    # type-check + production bundle
 
 ## Status
 
-v0.1 — working end to end (build via the UI or `npm run oxy`). See [PLAN.md](PLAN.md)
-for the roadmap and what's next (best-of-N judging, fresh-restart escalation, a
-Tauri desktop build).
+v0.1 — working end to end (build via the UI or `npm run oxy`), verified on **both**
+engines: a real in-process **node-llama-cpp** build (auto-downloaded GGUF, no
+Ollama, no compiler) and an **Ollama** build. See [PLAN.md](PLAN.md) for the
+roadmap and [DESIGN.md](DESIGN.md) for where we're headed — generating **backends**
+with small-context models (spec-first, per-file), **mobile** (iOS/Android) targets,
+and the curated-vs-generic **MCP** decision.

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStep } from "../agent/types.ts";
-import { exportUrl, getStatus, previewUrl, runBuild, type BuildEvent, type OxyStatus } from "./api.ts";
+import { Background } from "./Background.tsx";
+import { Settings } from "./Settings.tsx";
+import { exportUrl, getProjects, getStatus, previewUrl, runBuild, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
-const NUM_CTX = 16384; // matches the loop's context budget
+const NUM_CTX = 16384;
 
 const TOOL_ICON: Record<string, string> = {
   get_design_system: "palette",
@@ -35,6 +37,15 @@ function stepLabel(s: AgentStep): string {
     .join(", ");
 }
 
+function tagsFor(s: AgentStep): Array<{ cls: string; label: string }> {
+  const tags: Array<{ cls: string; label: string }> = [];
+  if (s.burst) tags.push({ cls: "think", label: "thinking" });
+  if (s.compacted) tags.push({ cls: "compact", label: "compacted" });
+  if (s.truncated) tags.push({ cls: "trunc", label: "truncated" });
+  if (s.done) tags.push({ cls: "done", label: "done" });
+  return tags;
+}
+
 // Prefer a coder/instruct model; never auto-pick a vision/embedding model.
 function pickDefaultModel(models: string[]): string {
   const isAux = (m: string) => /vl|vision|moondream|embed|clip/i.test(m);
@@ -48,13 +59,8 @@ function pickDefaultModel(models: string[]): string {
   );
 }
 
-function tagsFor(s: AgentStep): Array<{ cls: string; label: string }> {
-  const tags: Array<{ cls: string; label: string }> = [];
-  if (s.burst) tags.push({ cls: "think", label: "thinking" });
-  if (s.compacted) tags.push({ cls: "compact", label: "compacted" });
-  if (s.truncated) tags.push({ cls: "trunc", label: "truncated" });
-  if (s.done) tags.push({ cls: "done", label: "done" });
-  return tags;
+function projectLabel(id: string): string {
+  return id.replace(/-\d{8,}$/, "").replace(/-/g, " ").slice(0, 40) || id;
 }
 
 export function App() {
@@ -63,6 +69,10 @@ export function App() {
   const [model, setModel] = useState("");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(false);
+
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [selProject, setSelProject] = useState(""); // "" = new project
+  const [showSettings, setShowSettings] = useState(false);
 
   const [building, setBuilding] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
@@ -81,6 +91,7 @@ export function App() {
         setModel(pickDefaultModel(s.models));
       })
       .catch(() => setStatus({ engines: { ollama: false, "node-llama": true }, stitch: false, sd: false, models: [] }));
+    getProjects().then(setProjects);
   }, []);
 
   const ctxPct = useMemo(() => {
@@ -90,32 +101,60 @@ export function App() {
   }, [steps]);
 
   const hasWritten = steps.some((s) => s.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name)));
+  const selHasIndex = !!projects.find((p) => p.id === project)?.hasIndex;
+  const canPreview = !!project && (hasWritten || selHasIndex);
+
+  function changeEngine(next: string) {
+    setEngine(next);
+    if (next === "ollama") setModel(pickDefaultModel(status?.models ?? []));
+    else setModel("");
+  }
+
+  function selectProject(id: string) {
+    setSelProject(id);
+    setSteps([]);
+    setError("");
+    if (id) {
+      setProject(id);
+      setPreviewKey((k) => k + 1);
+    } else {
+      setProject(null);
+    }
+  }
 
   async function build() {
     if (building || !task.trim()) return;
     setBuilding(true);
     setError("");
     setSteps([]);
-    setProject(null);
     setStatusMsg("starting…");
+    if (!selProject) setProject(null);
     const ac = new AbortController();
     abortRef.current = ac;
+    let builtId = selProject || "";
     try {
-      await runBuild({ task: task.trim(), engine, model: model || undefined, useStitch }, (e: BuildEvent) => {
-        if (e.type === "status") setStatusMsg(e.message);
-        else if (e.type === "project") setProject(e.project);
-        else if (e.type === "step") {
-          setStatusMsg("");
-          setSteps((prev) => [...prev, e.step]);
-          if (e.step.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name))) {
+      await runBuild(
+        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined },
+        (e: BuildEvent) => {
+          if (e.type === "status") setStatusMsg(e.message);
+          else if (e.type === "project") {
+            builtId = e.project;
+            setProject(e.project);
+          } else if (e.type === "step") {
+            setStatusMsg("");
+            setSteps((prev) => [...prev, e.step]);
+            if (e.step.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name))) setPreviewKey((k) => k + 1);
+          } else if (e.type === "done") {
             setPreviewKey((k) => k + 1);
+          } else if (e.type === "error") {
+            setError(e.message);
           }
-        } else if (e.type === "done") {
-          setPreviewKey((k) => k + 1);
-        } else if (e.type === "error") {
-          setError(e.message);
-        }
-      }, ac.signal);
+        },
+        ac.signal,
+      );
+      const fresh = await getProjects();
+      setProjects(fresh);
+      if (builtId) setSelProject(builtId); // keep iterating on what we just built
     } catch (err: any) {
       if (!ac.signal.aborted) setError(String(err?.message ?? err));
     } finally {
@@ -130,162 +169,172 @@ export function App() {
     setBuilding(false);
   }
 
-  function changeEngine(next: string) {
-    setEngine(next);
-    if (next === "ollama") {
-      setModel(pickDefaultModel(status?.models ?? []));
-    } else {
-      setModel(""); // node-llama uses its bundled default GGUF unless a HF ref is given
-    }
-  }
-
   const modelOptions = engine === "ollama" ? status?.models ?? [] : [];
+  const iterating = !!selProject;
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>Oxy</h1>
-        <p>build web apps with a local model</p>
-      </header>
-
-      <section className="prompt">
-        <textarea
-          value={task}
-          onChange={(e) => setTask(e.target.value)}
-          placeholder="Describe the app you want to build…"
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build();
-          }}
-        />
-        {building ? (
-          <button className="build-btn" onClick={stop}>
-            Stop
-          </button>
-        ) : (
-          <button className="build-btn" onClick={build} disabled={!task.trim()}>
-            Build
-          </button>
-        )}
-      </section>
-
-      <section className="status-row">
-        <div className="pill" title="active engine and model">
-          <span className="material-symbols-outlined">memory</span>
-          <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
-            {status?.engines.ollama && <option value="ollama">ollama</option>}
-            <option value="node-llama">node-llama</option>
-          </select>
-          {engine === "ollama" ? (
-            modelOptions.length ? (
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
-                {modelOptions.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="label">no models</span>
-            )
-          ) : (
-            <input
-              className="model-input"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M"
-              spellCheck={false}
-            />
-          )}
-        </div>
-
-        <div className="context" title="how full the model's context window is">
-          <span className="num">{ctxPct}%</span>
-          <div className="track">
-            <div className="fill" style={{ width: `${ctxPct}%` }} />
+    <>
+      <Background />
+      <div className="app">
+        <div className="topbar">
+          <div className="brand">
+            <h1>Oxy</h1>
+            <p>build apps with a local model</p>
           </div>
-          <span className="tag">context</span>
-        </div>
-
-        {status?.stitch && (
-          <label className="stitch-toggle" title="let the model use Google Stitch (cloud) for the page design">
-            <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} /> design with Stitch
-          </label>
-        )}
-      </section>
-
-      {error && <div className="banner error">{error}</div>}
-
-      {(steps.length > 0 || building) && (
-        <section>
-          <p className="section-title">Build progress</p>
-          {statusMsg && steps.length === 0 && (
-            <div className="timeline empty">
-              <div className="card">
-                <div className="left">
-                  <span className="material-symbols-outlined">hourglass_top</span>
-                  <code>{statusMsg}</code>
-                </div>
-              </div>
-            </div>
-          )}
-          <div className={`timeline${steps.length === 0 ? " empty" : ""}`}>
-            {steps.map((s, i) => {
-              const active = building && i === steps.length - 1;
-              const done = s.done || (!active && !building);
-              return (
-                <div key={i} className={`step${active ? " active" : ""}`}>
-                  <div className="node">
-                    {active ? <span className="dot" /> : <span className="material-symbols-outlined">{done ? "check" : iconFor(s)}</span>}
-                  </div>
-                  <div className="card">
-                    <div className="left">
-                      <span className="material-symbols-outlined">{iconFor(s)}</span>
-                      <code>{stepLabel(s)}</code>
-                    </div>
-                    <div className="tags">
-                      {tagsFor(s).map((t) => (
-                        <span key={t.label} className={`tag-pill ${t.cls}`}>
-                          {t.label}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      <section className="preview">
-        <div className="browser-bar">
-          <div className="dots">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="addr">
-            <span className="material-symbols-outlined">lock</span>
-            {project ? `localhost / ${project}` : "preview"}
-          </div>
-          <div className="export">
-            <button disabled={!project || !hasWritten} onClick={() => project && window.open(exportUrl(project), "_blank")}>
-              <span className="material-symbols-outlined">download</span>
-              Export .zip
+          <div className="topbar-actions">
+            <select className="project-select glass" value={selProject} onChange={(e) => selectProject(e.target.value)} title="new project or iterate on an existing one">
+              <option value="">+ New project</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {projectLabel(p.id)}
+                </option>
+              ))}
+            </select>
+            <button className="gear glass" title="Settings" onClick={() => setShowSettings(true)}>
+              <span className="material-symbols-outlined">settings</span>
             </button>
           </div>
         </div>
-        <div className="preview-view">
-          {project && hasWritten ? (
-            <iframe key={previewKey} src={previewUrl(project)} title="preview" sandbox="allow-scripts" />
+
+        <section className="prompt glass">
+          <textarea
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            placeholder={iterating ? "Describe a change or addition…" : "Describe the app you want to build…"}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build();
+            }}
+          />
+          {building ? (
+            <button className="build-btn stop" onClick={stop}>
+              Stop
+            </button>
           ) : (
-            <div className="preview-empty">
-              <span className="material-symbols-outlined">web</span>
-              <p>{building ? "building your app — the preview will appear as soon as a page is written." : "Describe an app above and press Build. The live preview will appear here."}</p>
-            </div>
+            <button className="build-btn" onClick={build} disabled={!task.trim()}>
+              {iterating ? "Update" : "Build"}
+            </button>
           )}
-        </div>
-      </section>
-    </div>
+        </section>
+        <p className="helper">{iterating ? "iterating on this project — it reads the existing files and edits in place" : "or pick a project above to keep iterating on it"}</p>
+
+        <section className="status-row">
+          <div className="pill glass">
+            <span className="dot" />
+            <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
+              {status?.engines.ollama && <option value="ollama">ollama</option>}
+              <option value="node-llama">node-llama</option>
+            </select>
+            {engine === "ollama" ? (
+              modelOptions.length ? (
+                <select value={model} onChange={(e) => setModel(e.target.value)}>
+                  {modelOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="label">no models</span>
+              )
+            ) : (
+              <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M" spellCheck={false} />
+            )}
+          </div>
+
+          <div className="context" title="how full the model's context window is">
+            <span className="num">{ctxPct}%</span>
+            <div className="track">
+              <div className="fill" style={{ width: `${ctxPct}%` }} />
+            </div>
+            <span className="tag">context</span>
+          </div>
+
+          {status?.stitch && (
+            <label className="stitch-toggle" title="let the model use Google Stitch (cloud) for the page design">
+              <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} /> design with Stitch
+            </label>
+          )}
+        </section>
+
+        {error && <div className="banner error">{error}</div>}
+
+        {(steps.length > 0 || building) && (
+          <section>
+            <p className="section-title">Build progress</p>
+            {statusMsg && steps.length === 0 && (
+              <div className="timeline empty">
+                <div className="card glass">
+                  <div className="left">
+                    <span className="material-symbols-outlined">hourglass_top</span>
+                    <code>{statusMsg}</code>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className={`timeline${steps.length === 0 ? " empty" : ""}`}>
+              {steps.map((s, i) => {
+                const active = building && i === steps.length - 1;
+                return (
+                  <div key={i} className={`step${active ? " active" : ""}`}>
+                    <div className="node">{active ? <span className="live" /> : <span className="material-symbols-outlined">{s.done ? "check" : iconFor(s)}</span>}</div>
+                    <div className="card glass">
+                      <div className="left">
+                        <span className="material-symbols-outlined">{iconFor(s)}</span>
+                        <code>{stepLabel(s)}</code>
+                      </div>
+                      <div className="tags">
+                        {tagsFor(s).map((t) => (
+                          <span key={t.label} className={`tag-pill ${t.cls}`}>
+                            {t.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <section className="preview glass">
+          <div className="browser-bar">
+            <div className="dots">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="addr">
+              <span className="material-symbols-outlined">lock</span>
+              {project ? `oxy / ${projectLabel(project)}` : "preview"}
+            </div>
+            <div className="export">
+              <button disabled={!canPreview} onClick={() => project && window.open(exportUrl(project), "_blank")}>
+                <span className="material-symbols-outlined">download</span>
+                Export .zip
+              </button>
+            </div>
+          </div>
+          <div className="preview-view">
+            {canPreview && project ? (
+              <iframe key={previewKey} src={previewUrl(project)} title="preview" sandbox="allow-scripts" />
+            ) : (
+              <div className="preview-empty">
+                <span className="material-symbols-outlined">web</span>
+                <p>{building ? "building your app — the preview appears as soon as a page is written." : "Describe an app above and press Build. The live preview will appear here."}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {showSettings && (
+        <Settings
+          stitchAvailable={!!status?.stitch}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => getStatus().then(setStatus).catch(() => {})}
+        />
+      )}
+    </>
   );
 }

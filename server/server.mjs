@@ -487,6 +487,22 @@ export async function codelabHandler(req, res, next) {
       });
     }
 
+    // ---- Oxy: save the user's Stitch API key (to the gitignored stitch.key.local).
+    // The key is never returned to the client — only its presence (via /status). ----
+    if (pathPart === "/oxy/api/settings" && req.method === "POST") {
+      const body = await readBody(req);
+      const key = body.stitchApiKey;
+      if (typeof key !== "string") return sendJson(res, 200, { ok: false, error: "stitchApiKey must be a string" });
+      const keyPath = path.resolve(ROOT, "stitch.key.local");
+      try {
+        if (key.trim()) fs.writeFileSync(keyPath, `STITCH_API_KEY=${key.trim()}\n`, "utf8");
+        else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
+        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey() });
+      } catch (e) {
+        return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
+      }
+    }
+
     // ---- Oxy: run a build server-side, streaming AgentStep events as NDJSON ----
     if (pathPart === "/oxy/api/build" && req.method === "POST") {
       const body = await readBody(req);
@@ -518,8 +534,11 @@ export async function codelabHandler(req, res, next) {
         send({ type: "status", message: "preparing engine…" });
         await engine.ensureReady();
         const baseUrl = `http://${req.headers.host}`;
-        const project = await createProject(task.slice(0, 40), baseUrl);
-        send({ type: "project", project });
+        // continue an existing project (iterate) when an id is supplied, else create one
+        let project = typeof body.project === "string" && body.project ? body.project : null;
+        const iterate = !!project;
+        if (!project) project = await createProject(task.slice(0, 40), baseUrl);
+        send({ type: "project", project, iterate });
         const executor = new HttpToolExecutor({ baseUrl });
         let lastTok = 0;
         await runAgent(
@@ -529,6 +548,7 @@ export async function codelabHandler(req, res, next) {
             maxIterations: Number(body.maxIterations) || 14,
             temperature: Number(body.temperature) || 0.6,
             useStitch: !!body.useStitch,
+            iterate,
           },
           {
             engine,

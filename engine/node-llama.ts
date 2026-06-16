@@ -17,7 +17,7 @@
 // one-time model download. The Ollama adapter is the zero-install alternative.
 import { getLlama, LlamaChat, resolveModelFile } from "node-llama-cpp";
 import type { ChatMessage, Engine, EngineModelInfo, GenerateOptions, GenerateResult, ToolDef } from "./engine.ts";
-import { normalizeToolCalls, splitReasoning, toLlamaFunctions, toLlamaHistory } from "./node-llama-map.ts";
+import { normalizeToolCalls, parseTextToolCalls, splitReasoning, toLlamaFunctions, toLlamaHistory } from "./node-llama-map.ts";
 
 // A small, capable coder GGUF — good default for "just works" first run.
 const DEFAULT_MODEL = "hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M";
@@ -123,12 +123,24 @@ export class NodeLlamaEngine implements Engine {
 
     const usedIn = (meter?.usedInputTokens ?? 0) - beforeIn;
     const usedOut = (meter?.usedOutputTokens ?? 0) - beforeOut;
-    const { content, thinking } = splitReasoning(res.response ?? "");
+    const split = splitReasoning(res.response ?? "");
+    let content = split.content;
+
+    // Prefer node-llama-cpp's structured function calls; if the model instead
+    // emitted a tool call as text (common with small GGUFs), parse it out.
+    let toolCalls = normalizeToolCalls(res.functionCalls);
+    if (!toolCalls.length) {
+      const fallback = parseTextToolCalls(content, new Set(tools.map((t) => t.name)));
+      if (fallback.toolCalls.length) {
+        toolCalls = fallback.toolCalls;
+        content = fallback.content;
+      }
+    }
 
     return {
       content,
-      thinking,
-      toolCalls: normalizeToolCalls(res.functionCalls),
+      thinking: split.thinking,
+      toolCalls,
       promptTokens: usedIn > 0 ? usedIn : undefined,
       evalTokens: usedOut > 0 ? usedOut : undefined,
       truncated: res.metadata?.stopReason === "maxTokens",

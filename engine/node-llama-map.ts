@@ -78,6 +78,59 @@ export function normalizeToolCalls(functionCalls: Array<{ functionName?: string;
     .filter((tc): tc is ToolCall => tc.name.length > 0);
 }
 
+function safeJson(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return undefined;
+  }
+}
+
+// Pull a tool call out of a parsed object, tolerating the many shapes small
+// models emit ({name,arguments}, {tool,args}, {function:{...}}, {tool_call:{...}}).
+// Only accepted if the name is a KNOWN tool — so legitimate JSON the model writes
+// into a file is never mistaken for a tool call.
+function asCall(o: any, names: Set<string>): ToolCall | null {
+  if (!o || typeof o !== "object") return null;
+  const inner = o.tool_call ?? (typeof o.function === "object" ? o.function : null);
+  if (inner) return asCall(inner, names);
+  const name = o.name ?? o.tool ?? o.tool_name ?? (typeof o.function === "string" ? o.function : undefined);
+  let args = o.arguments ?? o.args ?? o.parameters ?? o.params ?? {};
+  if (typeof args === "string") args = safeJson(args) ?? {};
+  if (typeof name === "string" && names.has(name)) return { name, arguments: args };
+  return null;
+}
+
+/**
+ * Fallback for models that emit tool calls as TEXT (a ```json fenced block or a
+ * bare JSON object) instead of via node-llama-cpp's structured function calling —
+ * common with small/quantized local models. Extracts the call(s), gated to known
+ * tool names, and returns the content with the consumed blocks removed.
+ */
+export function parseTextToolCalls(content: string, names: Set<string>): { toolCalls: ToolCall[]; content: string } {
+  const calls: ToolCall[] = [];
+  let cleaned = content;
+  const fence = /```(?:json|tool_call|tool|xml|js)?\s*([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  let matchedAny = false;
+  while ((m = fence.exec(content))) {
+    const c = asCall(safeJson((m[1] ?? "").trim()), names);
+    if (c) {
+      calls.push(c);
+      cleaned = cleaned.replace(m[0], "");
+      matchedAny = true;
+    }
+  }
+  if (!matchedAny) {
+    const whole = asCall(safeJson(content.trim()), names);
+    if (whole) {
+      calls.push(whole);
+      cleaned = "";
+    }
+  }
+  return { toolCalls: calls, content: cleaned.trim() };
+}
+
 /**
  * Split a reasoning model's <think>…</think> trace out of the visible content.
  * node-llama-cpp's chat wrapper often already segments thoughts, in which case

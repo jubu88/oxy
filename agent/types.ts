@@ -55,6 +55,12 @@ export interface AgentConfig {
   consoleErrors?: string[];
   /** offer the cloud design_with_stitch tool (off = fully local) */
   useStitch?: boolean;
+  /**
+   * Continue/modify an EXISTING project rather than building from scratch: the
+   * loop seeds the model with the current file list and frames `task` as a change
+   * to make (read before editing, prefer edit_file, keep what works).
+   */
+  iterate?: boolean;
 }
 
 /** A file on disk in a project, as the backend reports it. */

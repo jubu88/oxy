@@ -45,17 +45,29 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
 
   const tools = buildTools(config.useStitch);
   const system = buildSystem(config.useStitch);
+
+  // Iterate mode seeds the model with the existing files and frames the task as a
+  // change to make; a fresh build seeds the task as something to create.
+  let initialUser: string;
+  if (config.iterate) {
+    let files: FileEntry[] = [];
+    try {
+      files = (JSON.parse(await executor.call("list_files", {}, ctx)) as FileEntry[]).filter((f) => !String(f.path).startsWith(".codelab"));
+    } catch {
+      /* none yet */
+    }
+    initialUser = iteratePrompt(config.task, files);
+  } else {
+    initialUser =
+      `Build this app:\n\n${config.task}\n\n` +
+      (config.consoleErrors?.length
+        ? `The current version produced these runtime errors in the browser — fix them:\n${config.consoleErrors.join("\n")}\n\n`
+        : "") +
+      `Start now. Remember: the entry file must be index.html, and call done when finished.`;
+  }
   const messages: ChatMessage[] = [
     { role: "system", content: system },
-    {
-      role: "user",
-      content:
-        `Build this app:\n\n${config.task}\n\n` +
-        (config.consoleErrors?.length
-          ? `The current version produced these runtime errors in the browser — fix them:\n${config.consoleErrors.join("\n")}\n\n`
-          : "") +
-        `Start now. Remember: the entry file must be index.html, and call done when finished.`,
-    },
+    { role: "user", content: initialUser },
   ];
 
   // ---- auto-compact + thinking-burst (engine-owned state; never round-tripped through the model) ----
@@ -215,9 +227,18 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     emit(compacted);
 
     // a turn with no tool calls and no done — nudge once (but not right after a reseed,
-    // whose seed already directs the next steps)
+    // whose seed already directs the next steps). If the model rambled in prose
+    // instead of calling a tool (common with weak local models), push back hard and
+    // arm a reasoning burst to help it produce a real call.
     if (!rawToolCalls.length && !compacted) {
-      messages.push({ role: "user", content: "Continue building with tool calls, or call done if index.html is complete." });
+      const rambled = content.trim().length > 40;
+      messages.push({
+        role: "user",
+        content: rambled
+          ? "You replied with text but called no tool. Do NOT write code or prose in chat — the ONLY way to create the page is to CALL the write_file tool with { path, content }. Respond now with a single tool call."
+          : "Continue building with tool calls, or call done if index.html is complete.",
+      });
+      if (rambled) thinkNext = true;
     }
   }
 }
@@ -228,4 +249,15 @@ function safeParse(s: string): any {
   } catch {
     return {};
   }
+}
+
+// Seed for iterating on an existing project: give the model the current files and
+// frame the task as a change, so it edits in place instead of rebuilding.
+function iteratePrompt(task: string, files: FileEntry[]): string {
+  return (
+    `You are MODIFYING an existing project — do NOT start over or recreate files from scratch. read_file before you edit, and prefer edit_file over rewriting whole files.\n\n` +
+    `FILES ALREADY ON DISK:\n${files.map((f) => `- ${f.path} (${f.bytes} bytes)`).join("\n") || "(none yet)"}\n\n` +
+    `THE CHANGE TO MAKE:\n${task}\n\n` +
+    `Read the relevant files first, make the change, and keep everything else working. The entry file must remain index.html. Call done when finished.`
+  );
 }

@@ -92,11 +92,13 @@ async function main() {
     console.log(`[oxy] preparing engine …`);
     await engine.ensureReady();
 
-    const project = await createProject(TASK.slice(0, 40), BASE);
-    console.log(`[oxy] project: ${project}\n`);
+    const existing = process.env.OXY_PROJECT;
+    const iterate = !!existing;
+    const project = existing || (await createProject(TASK.slice(0, 40), BASE));
+    console.log(`[oxy] project: ${project}${iterate ? " (iterating on existing)" : ""}\n`);
 
     const executor = new HttpToolExecutor({ baseUrl: BASE });
-    const config: AgentConfig = { task: TASK, project, maxIterations: MAX_ITER, temperature: TEMP, useStitch: USE_STITCH };
+    const config: AgentConfig = { task: TASK, project, maxIterations: MAX_ITER, temperature: TEMP, useStitch: USE_STITCH, iterate };
 
     const steps: AgentStep[] = [];
     let lastTokenLog = 0;

@@ -232,7 +232,20 @@ test("nudges once when a turn produces no tool calls", async () => {
   ]);
   await runAgent(baseConfig(), { engine, executor: new FakeExecutor(), onStep: () => {} });
   const turn1 = engine.seenMessages[1];
-  assert.ok(turn1.some((m) => m.role === "user" && m.content.includes("Continue building with tool calls")));
+  // a no-tool-call turn gets nudged toward calling a tool (wording varies by whether it rambled)
+  assert.ok(turn1.some((m) => m.role === "user" && /tool/i.test(m.content)));
+});
+
+test("rambling without a tool call triggers a forceful nudge + a burst next turn", async () => {
+  const engine = new FakeEngine([
+    { content: "Sure! Here is the full HTML for your page: <!doctype html><html><head>… (long prose, no tool call)" },
+    { toolCalls: [tc("write_file", { path: "index.html", content: "x" })] },
+    { toolCalls: [tc("done", { summary: "x" })] },
+  ]);
+  await runAgent(baseConfig(), { engine, executor: new FakeExecutor(), onStep: () => {} });
+  const turn1 = engine.seenMessages[1];
+  assert.ok(turn1.some((m) => m.role === "user" && /CALL the write_file tool/i.test(m.content)));
+  assert.equal(engine.seenThink[1], true); // a reasoning burst is armed after rambling
 });
 
 test("stops immediately when the signal is already aborted", async () => {
