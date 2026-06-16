@@ -11,7 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
@@ -22,13 +22,16 @@ const VISION_MODEL = process.env.VISION_MODEL || "moondream";
 const VISION_URL = process.env.OXY_VISION_URL || "http://localhost:11434/api/chat";
 let sharedBrowser = null; // reused Playwright browser instance
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PROJECTS = path.resolve(HERE, "..", "workspace", "projects");
+// Anchor to the repo root via cwd (robust whether loaded directly, via the
+// standalone launcher, or bundled into Vite's config — where import.meta.url
+// would point at a temp file). All run modes launch from the repo root.
+const ROOT = process.env.OXY_ROOT || process.cwd();
+const PROJECTS = path.resolve(ROOT, "workspace", "projects");
 
 // local Stable Diffusion (stable-diffusion.cpp). Paths are overridable via env;
 // feature degrades gracefully (tool reports "unavailable") if absent.
-const SD_CLI = process.env.SD_CLI || path.resolve(HERE, "..", "..", "sd", "vulkan", "sd-cli.exe");
-const SD_MODEL = process.env.SD_MODEL || path.resolve(HERE, "..", "..", "sd", "sd-v1-5.safetensors");
+const SD_CLI = process.env.SD_CLI || path.resolve(ROOT, "..", "sd", "vulkan", "sd-cli.exe");
+const SD_MODEL = process.env.SD_MODEL || path.resolve(ROOT, "..", "sd", "sd-v1-5.safetensors");
 const SD_TIMEOUT_MS = 240_000;
 let sdBusy = false; // SD is heavy — one generation at a time
 
@@ -43,7 +46,7 @@ let stitchBusy = false; // one cloud generation at a time
 function stitchApiKey() {
   if (process.env.STITCH_API_KEY) return process.env.STITCH_API_KEY.trim();
   try {
-    const m = fs.readFileSync(path.resolve(HERE, "..", "stitch.key.local"), "utf8").match(/STITCH_API_KEY=(.+)/);
+    const m = fs.readFileSync(path.resolve(ROOT, "stitch.key.local"), "utf8").match(/STITCH_API_KEY=(.+)/);
     return m ? m[1].trim() : "";
   } catch {
     return "";
@@ -456,11 +459,99 @@ function sendJson(res, code, obj) {
 // with /codelab/ are passed to next().
 export async function codelabHandler(req, res, next) {
   const u = req.url || "";
-  if (!u.startsWith("/codelab/")) return next();
+  if (!u.startsWith("/codelab/") && !u.startsWith("/oxy/")) return next();
   const [pathPart, queryPart] = u.split("?");
   const query = new URLSearchParams(queryPart || "");
 
   try {
+    // ---- Oxy: what's available (for the UI engine/model picker) ----
+    if (pathPart === "/oxy/api/status" && req.method === "GET") {
+      let ollamaUp = false;
+      let models = [];
+      try {
+        const v = await fetch("http://localhost:11434/api/version", { signal: AbortSignal.timeout(1500) });
+        ollamaUp = v.ok;
+        if (ollamaUp) {
+          const t = await (await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2500) })).json();
+          models = (t.models ?? []).map((m) => m.name);
+        }
+      } catch {
+        /* ollama not running */
+      }
+      return sendJson(res, 200, {
+        ok: true,
+        engines: { ollama: ollamaUp, "node-llama": true },
+        stitch: !!stitchApiKey(),
+        sd: fs.existsSync(SD_CLI) && fs.existsSync(SD_MODEL),
+        models,
+      });
+    }
+
+    // ---- Oxy: run a build server-side, streaming AgentStep events as NDJSON ----
+    if (pathPart === "/oxy/api/build" && req.method === "POST") {
+      const body = await readBody(req);
+      const task = body.task;
+      if (typeof task !== "string" || !task.trim()) return sendJson(res, 200, { ok: false, error: "task required" });
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Cache-Control", "no-store");
+      const send = (obj) => {
+        try {
+          res.write(JSON.stringify(obj) + "\n");
+        } catch {
+          /* client gone */
+        }
+      };
+      const ac = new AbortController();
+      req.on("close", () => ac.abort());
+      try {
+        // dynamic imports keep native modules out of Vite's config-load bundling
+        const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
+        let engine;
+        if (body.engine === "node-llama") {
+          const { NodeLlamaEngine } = await import("../engine/node-llama.ts");
+          engine = new NodeLlamaEngine({ modelRef: body.model });
+        } else {
+          const { OllamaEngine } = await import("../engine/ollama.ts");
+          engine = new OllamaEngine({ model: body.model });
+        }
+        send({ type: "status", message: "preparing engine…" });
+        await engine.ensureReady();
+        const baseUrl = `http://${req.headers.host}`;
+        const project = await createProject(task.slice(0, 40), baseUrl);
+        send({ type: "project", project });
+        const executor = new HttpToolExecutor({ baseUrl });
+        let lastTok = 0;
+        await runAgent(
+          {
+            task,
+            project,
+            maxIterations: Number(body.maxIterations) || 14,
+            temperature: Number(body.temperature) || 0.6,
+            useStitch: !!body.useStitch,
+          },
+          {
+            engine,
+            executor,
+            signal: ac.signal,
+            onStep: (s) => send({ type: "step", step: s }),
+            onProgress: (p) => {
+              if (p.tokens - lastTok >= 25) {
+                lastTok = p.tokens;
+                send({ type: "progress", iteration: p.iteration, tokens: p.tokens });
+              }
+            },
+          },
+        );
+        send({ type: "done", project });
+      } catch (e) {
+        send({ type: "error", message: String(e?.message ?? e) });
+      } finally {
+        res.end();
+      }
+      return;
+    }
+
     // ---- preview: /codelab/preview/<projectId>/<file...> ----
     if (pathPart.startsWith("/codelab/preview/")) {
       const rest = decodeURIComponent(pathPart.slice("/codelab/preview/".length));

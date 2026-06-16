@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Oxy - Local-first AI Web Builder</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;family=Geist:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-background": "#0b1c30",
+                        "on-primary-container": "#fffbff",
+                        "on-primary-fixed-variant": "#2f2ebe",
+                        "inverse-primary": "#c0c1ff",
+                        "on-tertiary-container": "#fffbff",
+                        "primary": "#4648d4",
+                        "outline": "#767586",
+                        "surface-tint": "#494bd6",
+                        "tertiary-fixed": "#ffdcc5",
+                        "on-tertiary-fixed-variant": "#703700",
+                        "surface-dim": "#cbdbf5",
+                        "secondary-fixed": "#e2dfff",
+                        "surface-variant": "#d3e4fe",
+                        "on-tertiary-fixed": "#301400",
+                        "inverse-on-surface": "#eaf1ff",
+                        "primary-fixed-dim": "#c0c1ff",
+                        "on-primary-fixed": "#07006c",
+                        "inverse-surface": "#213145",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed-dim": "#ffb783",
+                        "surface-container-low": "#eff4ff",
+                        "secondary-container": "#645efb",
+                        "error-container": "#ffdad6",
+                        "tertiary-container": "#b55d00",
+                        "on-primary": "#ffffff",
+                        "secondary-fixed-dim": "#c3c0ff",
+                        "error": "#ba1a1a",
+                        "on-secondary-fixed": "#0f0069",
+                        "primary-container": "#6063ee",
+                        "on-surface": "#0b1c30",
+                        "on-secondary": "#ffffff",
+                        "primary-fixed": "#e1e0ff",
+                        "on-secondary-fixed-variant": "#3323cc",
+                        "surface-container": "#e5eeff",
+                        "outline-variant": "#c7c4d7",
+                        "tertiary": "#904900",
+                        "on-secondary-container": "#fffbff",
+                        "surface-container-highest": "#d3e4fe",
+                        "surface": "#f8f9ff",
+                        "surface-container-high": "#dce9ff",
+                        "on-error-container": "#93000a",
+                        "background": "#f8f9ff",
+                        "surface-bright": "#f8f9ff",
+                        "secondary": "#4b41e1",
+                        "on-surface-variant": "#464554",
+                        "surface-container-lowest": "#ffffff",
+                        "on-error": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "12px",
+                        "2xl": "16px",
+                        "3xl": "24px",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "md": "16px",
+                        "margin-desktop": "32px",
+                        "gutter": "24px",
+                        "xl": "40px",
+                        "sm": "8px",
+                        "unit": "4px",
+                        "max-width-content": "1280px",
+                        "xs": "4px"
+                    },
+                    "fontFamily": {
+                        "display": ["Geist"],
+                        "code-sm": ["JetBrains Mono"],
+                        "headline-md": ["Geist"],
+                        "body-md": ["Geist"],
+                        "label-md": ["JetBrains Mono"],
+                        "body-lg": ["Geist"],
+                        "headline-lg": ["Geist"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #F9FAFB;
+            font-family: 'Geist', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-size: 1.25rem;
+        }
+        .custom-shadow {
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+        }
+        .glow-active {
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.15);
+        }
+        textarea:focus {
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1), 0 4px 20px rgba(0, 0, 0, 0.03);
+        }
+        .browser-inner-shadow {
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+        }
+    </style>
+</head>
+<body class="text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+<main class="max-w-[800px] mx-auto px-md py-xl space-y-xl">
+<!-- 1. Header Section -->
+<header class="flex flex-col items-center text-center space-y-xs">
+<h1 class="font-display text-headline-lg font-extrabold tracking-tight text-primary">
+                Oxy
+            </h1>
+<p class="font-body-md text-on-surface-variant/70">
+                build web apps with a local model
+            </p>
+</header>
+<!-- 2. Prompt Area Section -->
+<section class="relative group">
+<div class="relative flex items-end bg-surface-container-lowest rounded-3xl custom-shadow transition-all duration-300 border border-outline-variant/30 hover:border-outline-variant/60">
+<textarea class="w-full bg-transparent border-none focus:ring-0 rounded-3xl p-lg min-h-[120px] font-body-lg text-on-surface placeholder:text-outline-variant resize-none" placeholder="Describe the app you want to build…"></textarea>
+<div class="p-md">
+<button class="bg-primary text-on-primary font-display font-semibold px-lg py-sm rounded-xl hover:bg-primary-container transition-all active:scale-95 shadow-sm">
+                        Build
+                    </button>
+</div>
+</div>
+</section>
+<!-- 3. Status Row Section -->
+<section class="flex items-center justify-between px-xs">
+<div class="flex items-center space-x-sm">
+<div class="bg-surface-container-high px-sm py-xs rounded-full border border-outline-variant/20 flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-primary">memory</span>
+<span class="font-label-md text-on-surface-variant text-[11px] tracking-wider uppercase">node-llama-cpp · qwen2.5-coder</span>
+</div>
+</div>
+<div class="flex items-center gap-sm min-w-[200px]">
+<span class="font-label-md text-on-surface-variant text-[11px]">65%</span>
+<div class="h-1 flex-1 bg-surface-container rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[65%] rounded-full transition-all duration-1000 ease-in-out"></div>
+</div>
+<span class="font-label-md text-on-surface-variant text-[11px]">context</span>
+</div>
+</section>
+<!-- 4. Build Progress Panel Section -->
+<section class="space-y-md">
+<div class="relative space-y-gutter ml-lg pl-lg border-l border-outline-variant/30">
+<!-- Step 1 -->
+<div class="relative flex items-center gap-md group">
+<div class="absolute -left-[37px] w-6 h-6 bg-surface-container rounded-full flex items-center justify-center border-4 border-background">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant/60">check</span>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-2xl custom-shadow flex items-center justify-between w-full border border-transparent">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-outline">description</span>
+<code class="font-code-sm text-on-surface-variant">get_design_system · modern-saas</code>
+</div>
+<span class="bg-surface-container px-xs py-[2px] rounded text-[10px] font-label-md text-outline tracking-wider uppercase">compacted</span>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="relative flex items-center gap-md group">
+<div class="absolute -left-[37px] w-6 h-6 bg-surface-container rounded-full flex items-center justify-center border-4 border-background">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant/60">check</span>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-2xl custom-shadow flex items-center justify-between w-full border border-transparent">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-outline">architecture</span>
+<code class="font-code-sm text-on-surface-variant">write_file · index.html</code>
+</div>
+<span class="bg-surface-container px-xs py-[2px] rounded text-[10px] font-label-md text-outline tracking-wider uppercase">compacted</span>
+</div>
+</div>
+<!-- Step 3 (Active) -->
+<div class="relative flex items-center gap-md group">
+<div class="absolute -left-[37px] w-6 h-6 bg-primary-container rounded-full flex items-center justify-center border-4 border-background animate-pulse">
+<div class="w-2 h-2 bg-on-primary-container rounded-full"></div>
+</div>
+<div class="bg-surface-container-lowest p-md rounded-2xl custom-shadow glow-active flex items-center justify-between w-full border border-primary/20">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary">visibility</span>
+<code class="font-code-sm text-on-surface font-medium">review_design</code>
+</div>
+<span class="bg-primary/10 px-sm py-[2px] rounded text-[10px] font-label-md text-primary tracking-wider uppercase flex items-center gap-xs">
+<span class="w-1 h-1 bg-primary rounded-full"></span>
+                            thinking
+                        </span>
+</div>
+</div>
+</div>
+</section>
+<!-- 5. Preview Panel Section -->
+<section class="space-y-md">
+<div class="bg-surface-container-lowest rounded-3xl custom-shadow border border-outline-variant/30 overflow-hidden">
+<!-- Browser Top Bar -->
+<div class="px-md py-sm bg-surface-container/30 border-b border-outline-variant/20 flex items-center justify-between">
+<div class="flex items-center gap-sm w-1/3">
+<div class="flex gap-[6px]">
+<div class="w-[10px] h-[10px] rounded-full bg-error/40"></div>
+<div class="w-[10px] h-[10px] rounded-full bg-tertiary-fixed-dim"></div>
+<div class="w-[10px] h-[10px] rounded-full bg-primary/40"></div>
+</div>
+</div>
+<div class="flex-1 max-w-[400px]">
+<div class="bg-surface-container-low/50 border border-outline-variant/20 rounded-lg px-md py-[4px] flex items-center justify-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-outline">lock</span>
+<span class="font-label-md text-outline text-[11px]">localhost:3000</span>
+</div>
+</div>
+<div class="flex justify-end w-1/3">
+<button class="flex items-center gap-xs px-sm py-[4px] rounded-lg hover:bg-surface-container transition-colors font-label-md text-on-surface-variant text-[11px]">
+<span class="material-symbols-outlined text-[16px]">download</span>
+                            Export .zip
+                        </button>
+</div>
+</div>
+<!-- Browser Content View -->
+<div class="aspect-video bg-surface-container-lowest relative overflow-hidden flex items-center justify-center p-xl browser-inner-shadow">
+<!-- Placeholder Illustration -->
+<div class="w-full h-full rounded-2xl border border-outline-variant/10 overflow-hidden bg-white/50 backdrop-blur-sm relative">
+<div class="absolute inset-0 flex flex-col p-lg space-y-md">
+<div class="h-8 w-32 bg-surface-container rounded-lg"></div>
+<div class="flex-1 flex gap-md">
+<div class="flex-1 space-y-md">
+<div class="h-12 w-full bg-surface-container rounded-xl"></div>
+<div class="h-4 w-3/4 bg-surface-container/60 rounded-full"></div>
+<div class="h-4 w-1/2 bg-surface-container/60 rounded-full"></div>
+<div class="h-10 w-32 bg-primary/20 rounded-xl"></div>
+</div>
+<div class="flex-1 bg-surface-container-high/40 rounded-2xl relative overflow-hidden">
+<img class="w-full h-full object-cover opacity-60 grayscale hover:grayscale-0 transition-all duration-500" data-alt="A clean, minimalist abstract technology background with soft purple and blue gradients, reflecting a high-tech modern software development environment. The lighting is diffused and bright, creating a calm and professional atmosphere with high-end aesthetic appeal, using very soft organic shapes." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBptUGLiQ_k-oE0GzNORRk9y-R-HknpZ2Sb_zXZCl2OG7NrTAJkPR3AnlaqLh3n9SC-prWW0tiVQWSJGNh4EaMEHUgpYupnC2pPJb0Xl5m7fAUZhk83kmk4w2OXNCi9E4I8YU915leFfFe5XlsryEGc8kj-3R-xd-eJlqxVbzodSNYWzSHTL0vto1jwRvoG-kbZdkhJwlShG_xEUEwmspaED6HlXoo3KONjNtQ2ZMErISwmrVljZn1_yPzANRlo-szDthTOiPshjg"/>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Micro-interaction Script -->
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const textarea = document.querySelector('textarea');
+            const buildBtn = document.querySelector('button');
+
+            // Simple active state effect
+            buildBtn.addEventListener('click', () => {
+                const ripples = document.createElement('span');
+                buildBtn.appendChild(ripples);
+                setTimeout(() => ripples.remove(), 600);
+            });
+
+            // Smooth typing placeholder effect simulation could go here
+            // but keeping it minimalist as requested.
+        });
+    </script>
+</body></html>
