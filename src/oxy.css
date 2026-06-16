@@ -170,6 +170,23 @@ body {
   color: var(--muted);
   cursor: pointer;
 }
+.pill select.engine {
+  color: var(--primary);
+  font-weight: 500;
+}
+.pill .model-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  width: 300px;
+  max-width: 40vw;
+}
+.pill .model-input::placeholder {
+  color: var(--outline);
+}
 .pill .label {
   font-family: var(--mono);
   font-size: 11px;

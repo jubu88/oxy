@@ -29,23 +29,68 @@ Plus: a **jailed workspace** (the model can only touch its own project folder), 
 **sandboxed preview**, real **SVG icons** and a **design system**, optional local
 **Stable Diffusion** images and **Google Stitch** design.
 
-## Install (one command)
+## Install & run
 
 ```sh
 npm install      # ships prebuilt llama.cpp binaries (CPU + Vulkan/Metal/CUDA, auto-detected)
-npm run dev      # on first run, Oxy auto-downloads a small default model — then just build
+npm run dev      # open the UI; describe an app and press Build
 ```
 
-No Ollama, no separate inference server, no compiler. A GPU is used automatically
-if you have one; otherwise it runs on CPU.
+On first use Oxy picks an engine automatically: if **Ollama** is running it uses
+that (fast, nothing to download); otherwise the in-process **node-llama-cpp**
+engine downloads a small default coder model on the first build. A GPU is used
+automatically if you have one; otherwise it runs on CPU.
 
-## Engine
+Prefer the terminal? Build headlessly:
 
-Inference runs **in-process** via [`node-llama-cpp`](https://node-llama-cpp.withcat.ai)
-(bundled). You can plug in any GGUF model from HuggingFace. An **Ollama adapter** is
-available for people who already run Ollama. Both sit behind one `Engine` interface
-(`engine/engine.ts`) — see that file for the architecture.
+```sh
+npm run oxy      # OXY_TASK="build a ..." OXY_ENGINE=ollama|node-llama OXY_MODEL=... npm run oxy
+```
+
+## The interface
+
+The UI was designed in **Google Stitch** (`design/stitch-ui.html`) and rebuilt in
+React: a prompt box, a subtle engine/model picker, a live build timeline that
+surfaces the orchestration (context-pressure meter, `thinking` and `compacted`
+cues), a sandboxed preview, and one-click **Export .zip**. Calm, minimal, light.
+
+## Engines
+
+Inference runs through one `Engine` interface (`engine/engine.ts`) so the agent
+loop is backend-agnostic:
+
+- **`engine/node-llama.ts`** — in-process via
+  [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled). The default;
+  auto-downloads a small coder GGUF on first run. Plug in any GGUF by HuggingFace
+  ref in the model picker.
+- **`engine/ollama.ts`** — an adapter for people who already run Ollama.
+
+The loop uses the low-level `LlamaChat.generateResponse` (not the auto-tool-running
+`LlamaChatSession.prompt`), so the compaction/burst/strategy seam stays exposed —
+see `engine/engine.ts` for the architecture.
+
+## Architecture
+
+```
+agent/      engine-agnostic loop: tools, auto-compact, thinking-burst, token accounting
+engine/     Engine interface + node-llama-cpp and ollama adapters
+server/     jailed backend (file tools, preview, SSRF-guarded web, SD, Stitch) —
+            mounted in Vite (codeLabPlugin) or run standalone (serve.mjs)
+driver/     headless build driver (run-build.ts)
+src/        the React UI (designed in Stitch)
+design/     the Stitch-generated design reference
+```
+
+## Develop
+
+```sh
+npm test         # agent-loop + adapter unit tests (Node's built-in runner, no extra deps)
+npm run typecheck
+npm run build    # type-check + production bundle
+```
 
 ## Status
 
-v0.1 — scaffold. See [PLAN.md](PLAN.md) for the build-out roadmap.
+v0.1 — working end to end (build via the UI or `npm run oxy`). See [PLAN.md](PLAN.md)
+for the roadmap and what's next (best-of-N judging, fresh-restart escalation, a
+Tauri desktop build).

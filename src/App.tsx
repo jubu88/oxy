@@ -118,7 +118,16 @@ export function App() {
     setBuilding(false);
   }
 
-  const engineLabel = `${engine}${model ? ` · ${model.replace(/:latest$/, "")}` : ""}`;
+  function changeEngine(next: string) {
+    setEngine(next);
+    if (next === "ollama") {
+      const m = status?.models ?? [];
+      setModel(m.find((x) => /coder/i.test(x)) ?? m.find((x) => /gemma|qwen|llama/i.test(x)) ?? m[0] ?? "");
+    } else {
+      setModel(""); // node-llama uses its bundled default GGUF unless a HF ref is given
+    }
+  }
+
   const modelOptions = engine === "ollama" ? status?.models ?? [] : [];
 
   return (
@@ -151,9 +160,12 @@ export function App() {
       <section className="status-row">
         <div className="pill" title="active engine and model">
           <span className="material-symbols-outlined">memory</span>
-          {modelOptions.length ? (
-            <>
-              <span className="label">{engine}</span>
+          <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
+            {status?.engines.ollama && <option value="ollama">ollama</option>}
+            <option value="node-llama">node-llama</option>
+          </select>
+          {engine === "ollama" ? (
+            modelOptions.length ? (
               <select value={model} onChange={(e) => setModel(e.target.value)}>
                 {modelOptions.map((m) => (
                   <option key={m} value={m}>
@@ -161,9 +173,17 @@ export function App() {
                   </option>
                 ))}
               </select>
-            </>
+            ) : (
+              <span className="label">no models</span>
+            )
           ) : (
-            <span className="label">{engineLabel}</span>
+            <input
+              className="model-input"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M"
+              spellCheck={false}
+            />
           )}
         </div>
 
