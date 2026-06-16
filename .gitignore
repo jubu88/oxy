@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.local
+# secrets — never commit API keys (Stitch/Gemini etc.)
+*.key.local
+# downloaded GGUF models are large — never commit
+models/
+# per-build project workspaces + engine checkpoints
+workspace/projects/*
+!workspace/projects/.gitkeep
+# logs / run artifacts
+*.log
+last-run.json
+Thumbs.db
+.DS_Store

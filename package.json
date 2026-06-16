@@ -1,0 +1,25 @@
+{
+  "name": "oxy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Build web apps with a local LLM. Simple, beautiful, just works.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "node-llama-cpp": "^3",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4",
+    "typescript": "^5",
+    "vite": "^6"
+  },
+  "optionalDependencies": {
+    "playwright": "^1"
+  }
+}
