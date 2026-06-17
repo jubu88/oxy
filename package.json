@@ -12,7 +12,8 @@
     "test": "node --test agent/loop.test.ts engine/tool-parse.test.ts engine/openai-map.test.ts skillopt/score.test.ts skillopt/loop.test.ts",
     "oxy": "node driver/run-build.ts",
     "serve": "node server/serve.mjs",
-    "skillopt": "node skillopt/optimize.ts"
+    "skillopt": "node skillopt/optimize.ts",
+    "skillopt:ab": "node skillopt/ab.ts"
   },
   "dependencies": {
     "react": "^19",

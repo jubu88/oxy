@@ -21,16 +21,23 @@ import { optimizeSkill, type EvalResult, type Rollout } from "./loop.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
-const BASE = (process.env.OXY_BASE || "http://localhost:5188").replace(/\/+$/, "");
+// per-process default port so two runs don't fight over (or kill) a shared backend
+const DEFAULT_PORT = 5188 + (process.pid % 400);
+const BASE = (process.env.OXY_BASE || `http://localhost:${DEFAULT_PORT}`).replace(/\/+$/, "");
 const TARGET_ENGINE = process.env.OXY_ENGINE || "ollama";
 const TARGET_MODEL = process.env.OXY_MODEL || "gemma4:e4b";
 const OPT_ENGINE = process.env.OXY_OPT_ENGINE || "ollama";
 const OPT_MODEL = process.env.OXY_OPT_MODEL || TARGET_MODEL;
-const EPOCHS = Number(process.env.OXY_SO_EPOCHS) || 1;
-const BATCH = Number(process.env.OXY_SO_BATCH) || 0; // 0 = whole train set per step
-const MAXITER = Number(process.env.OXY_SO_MAXITER) || 10;
-const VAL_REPEATS = Number(process.env.OXY_SO_VAL_REPEATS) || 3; // median-of-K per val task (gate)
-const MARGIN = Number(process.env.OXY_SO_MARGIN) || 0; // accept only if val beats best by > this noise band
+// NaN-safe env number: keeps an explicit 0 (Number(x)||d would turn 0 into the default)
+const num = (v: string | undefined, d: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+const EPOCHS = num(process.env.OXY_SO_EPOCHS, 1); // 0 = baseline only (seed eval, no optimization)
+const BATCH = num(process.env.OXY_SO_BATCH, 0); // 0 = whole train set per step
+const MAXITER = num(process.env.OXY_SO_MAXITER, 10);
+const VAL_REPEATS = num(process.env.OXY_SO_VAL_REPEATS, 3); // median-of-K per val task (gate)
+const MARGIN = num(process.env.OXY_SO_MARGIN, 0); // accept only if val beats best by > this noise band
 const SKILL_PATH = path.join(REPO, "skill", "system.md");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -82,7 +89,7 @@ async function main() {
   const tasksFile = JSON.parse(readFileSync(path.join(HERE, "tasks.json"), "utf8"));
   let trainTasks: Task[] = tasksFile.train;
   let valTasks: Task[] = tasksFile.val;
-  const limit = Number(process.env.OXY_SO_LIMIT) || 0; // cap tasks for a quick smoke run
+  const limit = num(process.env.OXY_SO_LIMIT, 0); // cap tasks for a quick smoke run
   if (limit) {
     trainTasks = trainTasks.slice(0, limit);
     valTasks = valTasks.slice(0, limit);

@@ -12,5 +12,8 @@ workspace/projects/*
 *.log
 last-run.json
 skillopt/last-opt.json
+# A/B run artifacts + frozen pre-optimization skill copy
+skillopt/ab-report/
+skill/system.seed.md
 Thumbs.db
 .DS_Store

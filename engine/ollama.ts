@@ -54,6 +54,30 @@ export class OllamaEngine implements Engine {
     if (models.length && !models.some((m) => m.id === this.model)) {
       throw new Error(`model "${this.model}" is not available in Ollama — pull it with \`ollama pull ${this.model}\`, or pick one of: ${models.map((m) => m.id).join(", ")}`);
     }
+    await this.warm();
+  }
+
+  /** Pre-load the model so its (often 30s+) cold load happens here, not on the
+   *  first real generate. A big model loading under memory pressure can reset the
+   *  connection mid-load (surfaces as "fetch failed"), so retry a few times. */
+  private async warm(): Promise<void> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(`${this.host}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: this.model, messages: [{ role: "user", content: "hi" }], stream: false, keep_alive: "15m", options: { num_predict: 1 } }),
+        });
+        if (res.ok) {
+          await res.json().catch(() => {});
+          return;
+        }
+      } catch {
+        /* connection reset while loading — retry */
+      }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000));
+    }
+    // best-effort: don't hard-fail setup; the build path retries too
   }
 
   async listModels(): Promise<EngineModelInfo[]> {
