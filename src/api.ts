@@ -57,6 +57,8 @@ export interface BuildRequest {
   useStitch?: boolean;
   /** continue/modify an existing project instead of building a new one */
   project?: string;
+  /** for engine "openai": the OpenAI-compatible server base URL */
+  baseUrl?: string;
 }
 
 /** POST a build and stream NDJSON events back as they happen. */

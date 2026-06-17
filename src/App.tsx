@@ -69,6 +69,7 @@ export function App() {
   const [model, setModel] = useState("");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(false);
+  const [baseUrl, setBaseUrl] = useState("http://localhost:8080/v1"); // for engine "openai"
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selProject, setSelProject] = useState(""); // "" = new project
@@ -134,7 +135,7 @@ export function App() {
     let builtId = selProject || "";
     try {
       await runBuild(
-        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined },
+        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined },
         (e: BuildEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "project") {
@@ -223,6 +224,7 @@ export function App() {
             <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
               {status?.engines.ollama && <option value="ollama">ollama</option>}
               <option value="node-llama">node-llama</option>
+              <option value="openai">openai server</option>
             </select>
             {engine === "ollama" ? (
               modelOptions.length ? (
@@ -236,6 +238,11 @@ export function App() {
               ) : (
                 <span className="label">no models</span>
               )
+            ) : engine === "openai" ? (
+              <>
+                <input className="model-input" style={{ width: 190 }} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
+                <input className="model-input" style={{ width: 130 }} value={model} onChange={(e) => setModel(e.target.value)} placeholder="model" spellCheck={false} />
+              </>
             ) : (
               <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M" spellCheck={false} />
             )}

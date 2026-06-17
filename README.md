@@ -69,10 +69,16 @@ Inference runs through one `Engine` interface (`engine/engine.ts`) so the agent
 loop is backend-agnostic:
 
 - **`engine/node-llama.ts`** — in-process via
-  [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled). The default;
-  auto-downloads a small coder GGUF on first run. Plug in any GGUF by HuggingFace
-  ref in the model picker.
-- **`engine/ollama.ts`** — an adapter for people who already run Ollama.
+  [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled). The zero-install
+  default; auto-downloads a small coder GGUF on first run. Plug in any GGUF by
+  HuggingFace ref in the model picker. (Bound to its bundled llama.cpp, so the very
+  newest architectures may not load yet — use a server engine for those.)
+- **`engine/ollama.ts`** — for people who already run Ollama (has the newest models,
+  e.g. `gemma4:e4b`).
+- **`engine/openai-compat.ts`** — a generic adapter for **any OpenAI-compatible
+  server**: llama.cpp's `llama-server`, LM Studio, Jan, vLLM, Ollama's `/v1`, or a
+  remote endpoint. Point it at a base URL in the model picker. This is the escape
+  hatch when you want a model the in-process engine can't load yet.
 
 The loop uses the low-level `LlamaChat.generateResponse` (not the auto-tool-running
 `LlamaChatSession.prompt`), so the compaction/burst/strategy seam stays exposed —

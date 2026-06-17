@@ -527,6 +527,9 @@ export async function codelabHandler(req, res, next) {
         if (body.engine === "node-llama") {
           const { NodeLlamaEngine } = await import("../engine/node-llama.ts");
           engine = new NodeLlamaEngine({ modelRef: body.model });
+        } else if (body.engine === "openai") {
+          const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
+          engine = new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
         } else {
           const { OllamaEngine } = await import("../engine/ollama.ts");
           engine = new OllamaEngine({ model: body.model });

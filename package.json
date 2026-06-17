@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test agent/loop.test.ts engine/node-llama-map.test.ts",
+    "test": "node --test agent/loop.test.ts engine/node-llama-map.test.ts engine/openai-map.test.ts",
     "oxy": "node driver/run-build.ts",
     "serve": "node server/serve.mjs"
   },

@@ -72,6 +72,10 @@ async function makeEngine(): Promise<Engine> {
     const { NodeLlamaEngine } = await import("../engine/node-llama.ts");
     return new NodeLlamaEngine({ modelRef: process.env.OXY_MODEL });
   }
+  if (ENGINE === "openai") {
+    const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
+    return new OpenAICompatEngine({ baseUrl: process.env.OXY_OPENAI_BASE, model: process.env.OXY_MODEL || MODEL, apiKey: process.env.OXY_OPENAI_KEY });
+  }
   return new OllamaEngine({ model: MODEL });
 }
 
