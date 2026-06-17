@@ -36,12 +36,15 @@ npm install
 npm run dev      # open the UI; describe an app and press Build
 ```
 
-On first use Oxy picks an engine automatically: if **Ollama** is running it uses
-that (instant, nothing to download). Otherwise it falls back to a **managed
-llama-server** — on the first build Oxy downloads a prebuilt `llama-server` binary
-(no compiler) and the default **gemma4** model, then runs it for you. It
-auto-detects your GPU (CUDA/Vulkan, else CPU). Nothing to install manually either
-way.
+On first use Oxy picks the engine that will actually use your GPU. If **Ollama**
+is running *and* would offload to your GPU (NVIDIA/CUDA or Apple/Metal), it uses
+Ollama — instant, nothing to download. But Ollama doesn't use Vulkan, so on a
+**Vulkan-only GPU (e.g. an Intel iGPU)** Ollama would silently run on CPU — there
+Oxy prefers the **managed llama-server**, which reaches your GPU via Vulkan. On
+first use of llama-server Oxy downloads a prebuilt binary (no compiler) and the
+default **gemma4** model, then runs it for you (CUDA/Vulkan/Metal auto-detected,
+else CPU). The picker shows the **active backend** (`VULKAN` / `CUDA` / `CPU`) so
+you're never unknowingly on CPU. Nothing to install manually either way.
 
 Prefer the terminal? Build headlessly:
 
@@ -84,9 +87,12 @@ loop is backend-agnostic:
   works standalone against **any OpenAI-compatible server** (LM Studio, Jan, vLLM, a
   remote endpoint) — point it at a base URL in the model picker.
 
-When Ollama is running Oxy uses it (gemma4, instant). Otherwise it defaults to the
-**managed llama-server** so a fresh clone gets gemma4 with nothing to install. Tool
-calls that small models emit as text are recovered by a known-tool-gated parser
+Oxy prefers Ollama only when it would offload to your GPU (CUDA/Metal); on a
+Vulkan-only machine (e.g. an Intel iGPU) Ollama runs on CPU, so Oxy prefers the
+**managed llama-server** (Vulkan) — and the UI shows which backend is active, so
+you're never silently on CPU. With no Ollama it uses llama-server so a fresh clone
+gets gemma4 with nothing to install. The routing is `engine/gpu.ts`; tool calls
+that small models emit as text are recovered by a known-tool-gated parser
 (`engine/tool-parse.ts`).
 
 ## Architecture

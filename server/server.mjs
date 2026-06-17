@@ -478,9 +478,18 @@ export async function codelabHandler(req, res, next) {
       } catch {
         /* ollama not running */
       }
+      // smart engine routing: prefer Ollama only when it offloads to the GPU
+      // (CUDA/Metal); on a Vulkan-only machine Ollama is CPU, so prefer llama-server.
+      const { detectGpu, recommendEngine } = await import("../engine/gpu.ts");
+      const gpu = await detectGpu();
+      const rec = await recommendEngine(ollamaUp);
       return sendJson(res, 200, {
         ok: true,
         engines: { ollama: ollamaUp, "llama-server": true },
+        gpu: gpu.backend,
+        ollamaUsesGpu: gpu.ollamaUsesGpu,
+        recommended: rec.engine,
+        recommendReason: rec.reason,
         stitch: !!stitchApiKey(),
         sd: fs.existsSync(SD_CLI) && fs.existsSync(SD_MODEL),
         models,

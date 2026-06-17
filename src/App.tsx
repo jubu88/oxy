@@ -46,6 +46,16 @@ function tagsFor(s: AgentStep): Array<{ cls: string; label: string }> {
   return tags;
 }
 
+// Which processor the active engine will actually use here — shown so nobody is
+// silently on CPU. Ollama only offloads to CUDA/Metal; llama-server uses the
+// detected backend (incl. Vulkan on Intel/AMD).
+function processorLabel(engine: string, status: OxyStatus | null): string {
+  if (!status) return "";
+  if (engine === "openai") return "remote";
+  if (engine === "ollama") return status.ollamaUsesGpu ? (status.gpu ?? "gpu").toUpperCase() : "CPU";
+  return (status.gpu ?? "cpu").toUpperCase();
+}
+
 // Prefer a coder/instruct model; never auto-pick a vision/embedding model.
 function pickDefaultModel(models: string[]): string {
   const isAux = (m: string) => /vl|vision|moondream|embed|clip/i.test(m);
@@ -85,12 +95,11 @@ export function App() {
     getStatus()
       .then((s) => {
         setStatus(s);
-        if (!s.engines.ollama) {
-          setEngine("llama-server");
-          setModel("");
-        } else {
-          setModel(pickDefaultModel(s.models));
-        }
+        // smart routing: use the server's recommendation (Ollama only when it'd
+        // run on the GPU; else llama-server, which reaches the GPU via Vulkan)
+        const eng = s.recommended ?? (s.engines.ollama ? "ollama" : "llama-server");
+        setEngine(eng);
+        setModel(eng === "ollama" ? pickDefaultModel(s.models) : "");
       })
       .catch(() => setStatus({ engines: { ollama: false, "llama-server": true }, stitch: false, sd: false, models: [] }));
     getProjects().then(setProjects);
@@ -107,6 +116,7 @@ export function App() {
   const canPreview = !!project && (hasWritten || selHasIndex);
   const iterating = !!selProject;
   const modelOptions = engine === "ollama" ? status?.models ?? [] : [];
+  const proc = processorLabel(engine, status);
 
   function changeEngine(next: string) {
     setEngine(next);
@@ -237,6 +247,11 @@ export function App() {
               <input className="model-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
             ) : (
               <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemma4 default · or hf:org/repo:quant" spellCheck={false} />
+            )}
+            {proc && (
+              <span className={"proc" + (proc === "CPU" ? " cpu" : "")} title={status?.recommendReason || "where this engine runs"}>
+                {proc}
+              </span>
             )}
           </div>
 

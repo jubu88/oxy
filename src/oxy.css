@@ -197,6 +197,22 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* active backend badge — GPU (indigo) vs CPU (amber caution) so it's never hidden */
+.pill .proc {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.pill .proc.cpu {
+  background: color-mix(in srgb, var(--tertiary) 14%, transparent);
+  color: var(--tertiary);
+  border-color: color-mix(in srgb, var(--tertiary) 32%, transparent);
+}
 .context {
   display: flex;
   align-items: center;

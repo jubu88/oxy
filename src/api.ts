@@ -6,6 +6,13 @@ export interface OxyStatus {
   stitch: boolean;
   sd: boolean;
   models: string[];
+  /** detected best backend: "cuda" | "metal" | "vulkan" | "cpu" */
+  gpu?: string;
+  /** would Ollama offload to the GPU on this machine? (false ⇒ Ollama runs on CPU) */
+  ollamaUsesGpu?: boolean;
+  /** engine recommended for this machine ("ollama" or "llama-server") */
+  recommended?: string;
+  recommendReason?: string;
 }
 
 export type BuildEvent =
@@ -19,7 +26,7 @@ export type BuildEvent =
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
-  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [] };
+  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason };
 }
 
 export interface ProjectInfo {
