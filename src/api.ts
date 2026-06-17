@@ -13,6 +13,10 @@ export interface OxyStatus {
   /** engine recommended for this machine ("ollama" or "llama-server") */
   recommended?: string;
   recommendReason?: string;
+  /** which gateable tools are enabled (web_search/web_fetch/generate_image/run_command) */
+  tools?: Record<string, boolean>;
+  /** terminal sandbox mode: "container" | "host" | "disabled" */
+  terminalMode?: string;
 }
 
 export type BuildEvent =
@@ -26,7 +30,14 @@ export type BuildEvent =
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
-  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason };
+  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode };
+}
+
+/** Toggle gateable tools / set the terminal sandbox mode (server persists them). */
+export async function saveToolSettings(tools: Record<string, boolean>, terminalMode?: string): Promise<{ tools?: Record<string, boolean>; terminalMode?: string } | null> {
+  const r = await fetch("/oxy/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tools, terminalMode }) });
+  const j = await r.json();
+  return j.ok ? { tools: j.tools, terminalMode: j.terminalMode } : null;
 }
 
 export interface ProjectInfo {

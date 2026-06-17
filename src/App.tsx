@@ -390,7 +390,7 @@ export function App() {
       </div>
 
       {showSettings && (
-        <Settings stitchAvailable={!!status?.stitch} onClose={() => setShowSettings(false)} onSaved={() => getStatus().then(setStatus).catch(() => {})} />
+        <Settings stitchAvailable={!!status?.stitch} tools={status?.tools} terminalMode={status?.terminalMode} onClose={() => setShowSettings(false)} onSaved={() => getStatus().then(setStatus).catch(() => {})} />
       )}
     </>
   );

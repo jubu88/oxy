@@ -53,6 +53,28 @@ function stitchApiKey() {
   }
 }
 
+// Tool gating + terminal sandbox mode (oxy.settings.json, gitignored). run_command
+// is OFF by default; terminal mode defaults to the isolated container.
+const SETTINGS_PATH = path.resolve(ROOT, "oxy.settings.json");
+const DEFAULT_TOOLS = { web_search: true, web_fetch: true, generate_image: true, run_command: false };
+function readSettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+    return { tools: { ...DEFAULT_TOOLS, ...(s.tools || {}) }, terminalMode: ["container", "host", "disabled"].includes(s.terminalMode) ? s.terminalMode : "container" };
+  } catch {
+    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container" };
+  }
+}
+function writeSettings(next) {
+  const cur = readSettings();
+  const tools = { ...cur.tools };
+  if (next.tools && typeof next.tools === "object") for (const k of Object.keys(DEFAULT_TOOLS)) if (typeof next.tools[k] === "boolean") tools[k] = next.tools[k];
+  const terminalMode = ["container", "host", "disabled"].includes(next.terminalMode) ? next.terminalMode : cur.terminalMode;
+  const merged = { tools, terminalMode };
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), "utf8");
+  return merged;
+}
+
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 80;
 const MAX_FETCH_BYTES = 200 * 1024;
@@ -483,6 +505,7 @@ export async function codelabHandler(req, res, next) {
       const { detectGpu, recommendEngine } = await import("../engine/gpu.ts");
       const gpu = await detectGpu();
       const rec = await recommendEngine(ollamaUp);
+      const settings = readSettings();
       return sendJson(res, 200, {
         ok: true,
         engines: { ollama: ollamaUp, "llama-server": true },
@@ -493,6 +516,8 @@ export async function codelabHandler(req, res, next) {
         stitch: !!stitchApiKey(),
         sd: fs.existsSync(SD_CLI) && fs.existsSync(SD_MODEL),
         models,
+        tools: settings.tools,
+        terminalMode: settings.terminalMode,
       });
     }
 
@@ -500,13 +525,37 @@ export async function codelabHandler(req, res, next) {
     // The key is never returned to the client — only its presence (via /status). ----
     if (pathPart === "/oxy/api/settings" && req.method === "POST") {
       const body = await readBody(req);
-      const key = body.stitchApiKey;
-      if (typeof key !== "string") return sendJson(res, 200, { ok: false, error: "stitchApiKey must be a string" });
-      const keyPath = path.resolve(ROOT, "stitch.key.local");
       try {
-        if (key.trim()) fs.writeFileSync(keyPath, `STITCH_API_KEY=${key.trim()}\n`, "utf8");
-        else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
-        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey() });
+        if (typeof body.stitchApiKey === "string") {
+          const keyPath = path.resolve(ROOT, "stitch.key.local");
+          if (body.stitchApiKey.trim()) fs.writeFileSync(keyPath, `STITCH_API_KEY=${body.stitchApiKey.trim()}\n`, "utf8");
+          else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
+        }
+        let settings = readSettings();
+        if (body.tools || body.terminalMode) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode });
+        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode });
+      } catch (e) {
+        return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
+      }
+    }
+
+    // ---- run_command tool: gated + sandboxed shell execution. The backend is the
+    // authoritative gate — it refuses unless run_command is enabled in settings,
+    // regardless of what the model emits. ----
+    if (pathPart === "/codelab/api/run-command" && req.method === "POST") {
+      const body = await readBody(req);
+      const settings = readSettings();
+      if (!settings.tools.run_command) return sendJson(res, 200, { ok: false, error: "run_command is disabled — enable the terminal tool in Settings" });
+      const project = String(body.project || "");
+      const command = String(body.command || "");
+      const projectDir = path.join(PROJECTS, project);
+      if (!project || !path.resolve(projectDir).startsWith(path.resolve(PROJECTS)) || !fs.existsSync(projectDir)) {
+        return sendJson(res, 200, { ok: false, error: "unknown project" });
+      }
+      try {
+        const { runCommand } = await import("./sandbox.mjs");
+        const r = await runCommand(command, projectDir, { mode: settings.terminalMode, timeoutMs: 30000, maxOutput: 16000 });
+        return sendJson(res, 200, { ok: r.ok, output: r.output ?? (r.ok ? "(ran)" : "error"), mode: r.mode });
       } catch (e) {
         return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
       }
@@ -572,6 +621,7 @@ export async function codelabHandler(req, res, next) {
             iterate,
             systemOverride,
             attachments: attachments && attachments.length ? attachments : undefined,
+            enabledTools: readSettings().tools,
           },
           {
             engine,

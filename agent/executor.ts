@@ -92,6 +92,10 @@ export class HttpToolExecutor implements ToolExecutor {
         ).json();
         return r.ok ? `generated ${r.path} (${r.width}x${r.height}, ${r.seconds}s) — reference it with <img src="${r.path}">` : `error: ${r.error}`;
       }
+      if (name === "run_command") {
+        const r = await (await fetch(`${api}/run-command`, post({ project, command: args.command }))).json();
+        return r.ok ? r.output : `error: ${r.error || r.output}`;
+      }
       if (name === "done") return "done";
       return `error: unknown tool ${name}`;
     } catch (e: any) {

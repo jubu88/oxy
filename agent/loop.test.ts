@@ -100,9 +100,9 @@ test("public surface re-exports runAgent", () => {
 });
 
 test("stitch tool + rule are gated behind useStitch", () => {
-  assert.equal(TOOLS.length, 12);
-  assert.ok(!buildTools(false).some((t) => t.name === "design_with_stitch"));
-  assert.ok(buildTools(true).some((t) => t.name === "design_with_stitch"));
+  assert.equal(TOOLS.length, 13);
+  assert.ok(!buildTools({ useStitch: false }).some((t) => t.name === "design_with_stitch"));
+  assert.ok(buildTools({ useStitch: true }).some((t) => t.name === "design_with_stitch"));
   assert.ok(!buildSystem(false).includes("design_with_stitch"));
   assert.ok(buildSystem(true).includes("design_with_stitch"));
 });

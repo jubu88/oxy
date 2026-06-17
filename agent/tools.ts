@@ -122,6 +122,16 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: {} },
   },
   {
+    name: "run_command",
+    description:
+      "Run a shell command in the project's sandboxed working directory and return its (truncated) output. Use for build steps, running tests, or inspecting files. Runs in an isolated, network-less container (or a gated host environment). Keep commands short and non-interactive; destructive commands are refused.",
+    parameters: {
+      type: "object",
+      properties: { command: { type: "string", description: "the shell command to run, e.g. \"npm test\" or \"ls -la\"" } },
+      required: ["command"],
+    },
+  },
+  {
     name: "done",
     description:
       "Call this when the app is complete and index.html is written. Provide a one-line summary of what you built.",
@@ -162,7 +172,19 @@ export function buildSystem(useStitch?: boolean, override?: string): string {
   return useStitch ? `${base}\n${STITCH_RULE}` : base;
 }
 
-/** The tool set for a run; the cloud Stitch tool is offered only when opted in. */
-export function buildTools(useStitch?: boolean): ToolDef[] {
-  return useStitch ? TOOLS : TOOLS.filter((t) => t.name !== "design_with_stitch");
+// Gated tools: powerful ones the user toggles in Settings. The rest (file ops,
+// design system, icons, review, done) are always-on. run_command defaults OFF.
+export const GATEABLE_TOOLS = ["web_search", "web_fetch", "generate_image", "run_command"] as const;
+const DEFAULT_ENABLED: Record<string, boolean> = { web_search: true, web_fetch: true, generate_image: true, run_command: false };
+
+/** The tool set offered to the model. Stitch is gated by its own flag; the powerful
+ *  GATEABLE tools are offered only when enabled (so the model can't call what it
+ *  can't see — the backend enforces the same gate as the real boundary). */
+export function buildTools(opts: { useStitch?: boolean; enabled?: Record<string, boolean> } = {}): ToolDef[] {
+  const enabled = { ...DEFAULT_ENABLED, ...(opts.enabled ?? {}) };
+  return TOOLS.filter((t) => {
+    if (t.name === "design_with_stitch") return !!opts.useStitch;
+    if ((GATEABLE_TOOLS as readonly string[]).includes(t.name)) return enabled[t.name] === true;
+    return true;
+  });
 }

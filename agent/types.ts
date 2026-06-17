@@ -71,6 +71,8 @@ export interface AgentConfig {
   systemOverride?: string;
   /** images/audio attached to the build prompt (for a multimodal model, e.g. gemma4) */
   attachments?: Attachment[];
+  /** which gateable tools (web_search/web_fetch/generate_image/run_command) are enabled */
+  enabledTools?: Record<string, boolean>;
 }
 
 /** A file on disk in a project, as the backend reports it. */

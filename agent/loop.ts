@@ -43,7 +43,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   const { engine, executor, onStep, onProgress, signal } = deps;
   const ctx = { project: config.project };
 
-  const tools = buildTools(config.useStitch);
+  const tools = buildTools({ useStitch: config.useStitch, enabled: config.enabledTools });
   const system = buildSystem(config.useStitch, config.systemOverride);
 
   // Iterate mode seeds the model with the existing files and frames the task as a
