@@ -72,7 +72,9 @@ loop is backend-agnostic:
   first use Oxy downloads a *prebuilt* `llama-server` from llama.cpp's releases (no
   compiler) plus the GGUF (default **gemma4 E4B**), runs it in the background, and
   drives it via the OpenAI-compatible adapter. You still just `npm run dev` — Oxy
-  manages everything. This runs models the in-process engine can't load yet.
+  manages everything, and **auto-detects your GPU** (NVIDIA→CUDA, else Vulkan, else
+  CPU; macOS→Metal), falling back to CPU if the GPU backend fails. This runs models
+  the in-process engine can't load yet (e.g. gemma4). Override with `OXY_LLAMA_VARIANT`.
 - **`engine/node-llama.ts`** — in-process via
   [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled), the leanest path:
   no server process at all. Auto-downloads a small coder GGUF; plug in any GGUF by

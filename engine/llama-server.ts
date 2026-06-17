@@ -27,7 +27,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface LlamaServerOptions {
   modelRef?: string;
-  /** cpu (default, works everywhere) | vulkan | cuda-12.4 | cuda-13.3 | … */
+  /** "auto" (default: detect CUDA → Vulkan → CPU) | cpu | vulkan | cuda-12.4 | cuda-13.3 | metal */
   variant?: string;
   port?: number;
   contextSize?: number;
@@ -42,6 +42,44 @@ async function extractArchive(archive: string, destDir: string): Promise<void> {
   } else {
     await execFileP("tar", ["-xf", archive, "-C", destDir]); // .tar.gz on mac/linux
   }
+}
+
+// Pick the fastest backend the machine can actually run: NVIDIA→CUDA (Windows ships
+// a prebuilt CUDA runtime), else a Vulkan loader→Vulkan (covers AMD/Intel/NVIDIA),
+// else CPU. macOS uses the Metal-enabled build. Override with OXY_LLAMA_VARIANT.
+async function detectWindowsCuda(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP("nvidia-smi", [], { timeout: 5000 });
+    const m = stdout.match(/CUDA Version:\s*([\d.]+)/);
+    const v = m ? parseFloat(m[1]) : 0;
+    return v >= 13.3 ? "cuda-13.3" : "cuda-12.4"; // NVIDIA present → CUDA (12.4 baseline)
+  } catch {
+    return null; // no NVIDIA driver
+  }
+}
+
+async function hasVulkan(): Promise<boolean> {
+  if (process.platform === "win32") {
+    return fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "vulkan-1.dll"));
+  }
+  for (const p of ["/usr/lib/x86_64-linux-gnu/libvulkan.so.1", "/usr/lib/libvulkan.so.1", "/usr/lib64/libvulkan.so.1", "/lib/x86_64-linux-gnu/libvulkan.so.1"]) {
+    if (fs.existsSync(p)) return true;
+  }
+  try {
+    await execFileP("vulkaninfo", ["--summary"], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function detectVariant(): Promise<string> {
+  if (process.platform === "darwin") return "metal"; // macOS build has Metal built in (asset has no variant)
+  if (process.platform === "win32") {
+    return (await detectWindowsCuda()) ?? ((await hasVulkan()) ? "vulkan" : "cpu");
+  }
+  // linux: prefer Vulkan (vendor-neutral, no system-CUDA assumptions); CUDA via env if wanted
+  return (await hasVulkan()) ? "vulkan" : "cpu";
 }
 
 function findFile(dir: string, name: string): string | null {
@@ -92,6 +130,17 @@ async function ensureBinary(variant: string): Promise<string> {
   }
   await extractArchive(archive, destDir);
   fs.rmSync(archive, { force: true });
+  // CUDA builds need the CUDA runtime DLLs next to the server (Windows ships them)
+  if (process.platform === "win32" && variant.startsWith("cuda")) {
+    const cudartName = `cudart-llama-bin-win-${variant}-x64.zip`;
+    const cudart = (rel.assets ?? []).find((a: any) => a.name === cudartName);
+    if (cudart) {
+      const ca = path.join(destDir, cudartName);
+      if (!fs.existsSync(ca)) fs.writeFileSync(ca, Buffer.from(await (await fetch(cudart.browser_download_url)).arrayBuffer()));
+      await extractArchive(ca, destDir);
+      fs.rmSync(ca, { force: true });
+    }
+  }
   const found = findFile(destDir, exe);
   if (!found) throw new Error(`extracted ${asset.name} but ${exe} not found inside`);
   if (process.platform !== "win32") fs.chmodSync(found, 0o755);
@@ -104,18 +153,19 @@ export class LlamaServerEngine implements Engine {
   private variant: string;
   private port: number;
   private contextSize: number;
-  private gpuLayers: number;
+  private gpuLayers = 0;
+  private nglOverride: number | null;
   private child: ChildProcess | null = null;
   private inner: OpenAICompatEngine | null = null;
   private ready = false;
 
   constructor(opts: LlamaServerOptions = {}) {
     this.modelRef = opts.modelRef ?? process.env.OXY_MODEL ?? DEFAULT_MODEL;
-    this.variant = opts.variant ?? process.env.OXY_LLAMA_VARIANT ?? "cpu";
+    // "auto" → detected in ensureReady (NVIDIA→CUDA, else Vulkan, else CPU)
+    this.variant = opts.variant ?? process.env.OXY_LLAMA_VARIANT ?? "auto";
     this.port = opts.port ?? (process.env.OXY_LLAMA_PORT ? Number(process.env.OXY_LLAMA_PORT) : 8080);
     this.contextSize = opts.contextSize ?? (process.env.OXY_LLAMA_CTX ? Number(process.env.OXY_LLAMA_CTX) : 16384);
-    const ngl = opts.gpuLayers ?? (process.env.OXY_LLAMA_NGL ? Number(process.env.OXY_LLAMA_NGL) : undefined);
-    this.gpuLayers = ngl ?? (this.variant === "cpu" ? 0 : 999);
+    this.nglOverride = opts.gpuLayers ?? (process.env.OXY_LLAMA_NGL ? Number(process.env.OXY_LLAMA_NGL) : null);
   }
 
   get activeModel(): string {
@@ -143,6 +193,24 @@ export class LlamaServerEngine implements Engine {
 
   async ensureReady(): Promise<void> {
     if (this.ready) return;
+    if (this.variant === "auto") this.variant = await detectVariant();
+    this.gpuLayers = this.nglOverride ?? (this.variant === "cpu" ? 0 : 999);
+    try {
+      await this.boot();
+    } catch (e: any) {
+      if (this.variant === "cpu") throw e;
+      // a GPU backend can fail (driver/VRAM/loader) — fall back to CPU so a build never blocks
+      console.warn(`[oxy] llama-server ${this.variant} backend failed, falling back to CPU: ${String(e?.message ?? e).slice(0, 160)}`);
+      await this.dispose();
+      this.variant = "cpu";
+      this.gpuLayers = 0;
+      await this.boot();
+    }
+    this.ready = true;
+  }
+
+  private async boot(): Promise<void> {
+    console.log(`[oxy] llama-server backend: ${this.variant} (${this.gpuLayers > 0 ? "GPU-offload" : "CPU"})`);
     const bin = await ensureBinary(this.variant);
     const modelPath = await resolveModelFile(this.modelRef);
     const args = [
@@ -158,15 +226,15 @@ export class LlamaServerEngine implements Engine {
     this.child.stderr?.on("data", (d) => (stderrTail = (stderrTail + d).slice(-800)));
     this.child.on("error", (e) => (stderrTail += `\n${e.message}`));
     try {
-      await this.waitForHealth(240_000); // model load on CPU can be slow
+      await this.waitForHealth(240_000); // model load can be slow
     } catch (e: any) {
       this.child?.kill();
+      this.child = null;
       throw new Error(`${String(e?.message ?? e)}${stderrTail ? `\nllama-server: ${stderrTail.slice(-400)}` : ""}`);
     }
     // drive the running server through the OpenAI-compatible adapter
     this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
     await this.inner.ensureReady();
-    this.ready = true;
   }
 
   async listModels(): Promise<EngineModelInfo[]> {
