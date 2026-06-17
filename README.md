@@ -54,12 +54,11 @@ npm run oxy      # default: managed llama-server + gemma4
 
 ![Oxy](design/screenshot.png)
 
-A clean, high-contrast command deck — designed in **Google Stitch**
-(`design/stitch-ui.html`, regenerate with `node design/gen-stitch.mjs`) and built
-in React with Tailwind using the design's exact tokens. It has a prompt box, an
-engine/model picker, a live build timeline that surfaces the orchestration
-(context-pressure meter, `thinking` / `compacted` cues), a sandboxed preview, and
-one-click **Export .zip**.
+A clean, calm **light** interface — designed in **Google Stitch**
+(`design/stitch-ui.html`, regenerate with `node design/gen-stitch.mjs`) over a
+subtle drifting pastel aurora. It has a prompt box, an engine/model picker, a live
+build timeline that surfaces the orchestration (context-pressure meter,
+`thinking` / `compacted` cues), a sandboxed preview, and one-click **Export .zip**.
 
 - **Iterate, don't restart.** Pick an existing project from the switcher and
   describe a change — the model reads the current files and edits in place.
