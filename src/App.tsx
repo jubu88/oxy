@@ -88,8 +88,12 @@ export function App() {
     getStatus()
       .then((s) => {
         setStatus(s);
-        if (!s.engines.ollama && s.engines["node-llama"]) setEngine("node-llama");
-        setModel(pickDefaultModel(s.models));
+        if (!s.engines.ollama) {
+          setEngine("llama-server"); // managed: downloads gemma4 + a prebuilt server, no manual install
+          setModel("");
+        } else {
+          setModel(pickDefaultModel(s.models));
+        }
       })
       .catch(() => setStatus({ engines: { ollama: false, "node-llama": true }, stitch: false, sd: false, models: [] }));
     getProjects().then(setProjects);
@@ -223,6 +227,7 @@ export function App() {
             <span className="dot" />
             <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
               {status?.engines.ollama && <option value="ollama">ollama</option>}
+              <option value="llama-server">llama-server · gemma4</option>
               <option value="node-llama">node-llama</option>
               <option value="openai">openai server</option>
             </select>
@@ -244,7 +249,13 @@ export function App() {
                 <input className="model-input" style={{ width: 130 }} value={model} onChange={(e) => setModel(e.target.value)} placeholder="model" spellCheck={false} />
               </>
             ) : (
-              <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M" spellCheck={false} />
+              <input
+                className="model-input"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={engine === "llama-server" ? "hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M (default)" : "hf:Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M"}
+                spellCheck={false}
+              />
             )}
           </div>
 

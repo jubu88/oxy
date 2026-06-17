@@ -7,6 +7,7 @@
 // one adapter, many backends — without leaving the Engine abstraction.
 import type { ChatMessage, Engine, EngineModelInfo, GenerateOptions, GenerateResult, ToolCall, ToolDef } from "./engine.ts";
 import { finalizeToolCalls, toOpenAIMessages, toOpenAITools } from "./openai-map.ts";
+import { parseTextToolCalls } from "./node-llama-map.ts";
 
 const DEFAULT_BASE = "http://localhost:8080/v1"; // llama.cpp llama-server default
 
@@ -143,7 +144,15 @@ export class OpenAICompatEngine implements Engine {
       if (!opts.signal?.aborted) throw e;
     }
 
-    const toolCalls: ToolCall[] = finalizeToolCalls(toolFrags);
+    let toolCalls: ToolCall[] = finalizeToolCalls(toolFrags);
+    // fallback for servers/models that emit tool calls as text instead of structured
+    if (!toolCalls.length && tools.length) {
+      const fb = parseTextToolCalls(content, new Set(tools.map((t) => t.name)));
+      if (fb.toolCalls.length) {
+        toolCalls = fb.toolCalls;
+        content = fb.content;
+      }
+    }
     return {
       content,
       toolCalls,

@@ -68,17 +68,25 @@ meter, `thinking` / `compacted` cues), a sandboxed preview, and one-click
 Inference runs through one `Engine` interface (`engine/engine.ts`) so the agent
 loop is backend-agnostic:
 
+- **`engine/llama-server.ts`** — **managed, recommended for the latest models.** On
+  first use Oxy downloads a *prebuilt* `llama-server` from llama.cpp's releases (no
+  compiler) plus the GGUF (default **gemma4 E4B**), runs it in the background, and
+  drives it via the OpenAI-compatible adapter. You still just `npm run dev` — Oxy
+  manages everything. This runs models the in-process engine can't load yet.
 - **`engine/node-llama.ts`** — in-process via
-  [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled). The zero-install
-  default; auto-downloads a small coder GGUF on first run. Plug in any GGUF by
-  HuggingFace ref in the model picker. (Bound to its bundled llama.cpp, so the very
-  newest architectures may not load yet — use a server engine for those.)
-- **`engine/ollama.ts`** — for people who already run Ollama (has the newest models,
-  e.g. `gemma4:e4b`).
-- **`engine/openai-compat.ts`** — a generic adapter for **any OpenAI-compatible
-  server**: llama.cpp's `llama-server`, LM Studio, Jan, vLLM, Ollama's `/v1`, or a
-  remote endpoint. Point it at a base URL in the model picker. This is the escape
-  hatch when you want a model the in-process engine can't load yet.
+  [`node-llama-cpp`](https://node-llama-cpp.withcat.ai) (bundled), the leanest path:
+  no server process at all. Auto-downloads a small coder GGUF; plug in any GGUF by
+  HuggingFace ref. (Bound to its bundled llama.cpp, so brand-new architectures like
+  `gemma4` won't load until node-llama-cpp updates — use llama-server for those now.)
+- **`engine/ollama.ts`** — for people who already run Ollama (also has the newest
+  models, e.g. `gemma4:e4b`); used automatically when Ollama is detected.
+- **`engine/openai-compat.ts`** — the generic adapter under llama-server/Ollama; also
+  works standalone against **any OpenAI-compatible server** (LM Studio, Jan, vLLM, a
+  remote endpoint) — point it at a base URL in the model picker.
+
+When Ollama is running Oxy uses it (gemma4, instant). Otherwise it defaults to the
+**managed llama-server** so a fresh clone gets gemma4 with nothing to install. Pick
+`node-llama` in the model picker for the no-download, fully in-process path.
 
 The loop uses the low-level `LlamaChat.generateResponse` (not the auto-tool-running
 `LlamaChatSession.prompt`), so the compaction/burst/strategy seam stays exposed —

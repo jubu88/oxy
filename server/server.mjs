@@ -530,6 +530,9 @@ export async function codelabHandler(req, res, next) {
         } else if (body.engine === "openai") {
           const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
           engine = new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
+        } else if (body.engine === "llama-server") {
+          const { LlamaServerEngine } = await import("../engine/llama-server.ts");
+          engine = new LlamaServerEngine({ modelRef: body.model || undefined });
         } else {
           const { OllamaEngine } = await import("../engine/ollama.ts");
           engine = new OllamaEngine({ model: body.model });
