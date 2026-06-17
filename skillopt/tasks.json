@@ -1,5 +1,5 @@
 {
-  "_comment": "SkillOpt build benchmark. Each task is built with the candidate skill, then scored (renders cleanly? required elements/text present? finished?). train = optimize on; val = the held-out gate.",
+  "_comment": "SkillOpt build benchmark. Each task is built with the candidate skill, then scored: renders without errors? required elements/text present? AND (where declared) does the app actually WORK when driven? Interactions are driven by visible text/role and mostly assert that body.innerText changed, so they can't be satisfied by a static mockup and don't depend on the agent's CSS class names. train = optimize on; val = the held-out gate.",
   "train": [
     {
       "id": "hello",
@@ -9,39 +9,75 @@
     {
       "id": "counter",
       "prompt": "Build a counter app: a large number starting at 0, with a + button and a - button that increase and decrease it. Make it work with vanilla JavaScript. Single index.html. Then call done.",
-      "checks": { "selectors": ["button"], "textIncludes": ["0"] }
+      "checks": {
+        "selectors": ["button"],
+        "textIncludes": ["0"],
+        "interactions": [{ "steps": [{ "clickText": "+" }], "expect": [{ "changed": true, "label": "clicking + changes the displayed number" }] }]
+      }
     },
     {
       "id": "todo",
       "prompt": "Build a simple to-do list: a text input, an 'Add' button, and a list below. Typing and pressing Add appends the item to the list (vanilla JavaScript). Single index.html. Then call done.",
-      "checks": { "selectors": ["input", "button", "ul, ol"], "textIncludes": ["add"] }
+      "checks": {
+        "selectors": ["input", "button", "ul, ol"],
+        "textIncludes": ["add"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "Buy milk" } }, { "clickText": "Add" }], "expect": [{ "contains": "Buy milk", "label": "the typed item appears in the list after Add" }] }]
+      }
     },
     {
       "id": "pomodoro",
       "prompt": "Build a Pomodoro focus timer showing 25:00, with Start and Reset buttons that run a working countdown in vanilla JavaScript. Single index.html. Then call done.",
-      "checks": { "selectors": ["button"], "textIncludes": ["25:00", "start"] }
+      "checks": {
+        "selectors": ["button"],
+        "textIncludes": ["25:00", "start"],
+        "interactions": [{ "steps": [{ "clickText": "Start" }, { "waitMs": 1200 }], "expect": [{ "changed": true, "label": "the timer counts down after Start" }] }]
+      }
     },
     {
       "id": "pricing",
       "prompt": "Build a 3-tier pricing section: three cards (Basic, Pro, Team) each with a price, a few features, and a 'Choose' button. Single index.html. Then call done.",
-      "checks": { "selectors": ["button, a"], "textIncludes": ["pro", "choose"] }
+      "checks": { "selectors": ["button, a"], "textIncludes": ["basic", "pro", "team", "choose"] }
     }
   ],
   "val": [
     {
       "id": "calculator",
       "prompt": "Build a simple calculator: a display and number/operator buttons that compute results in vanilla JavaScript. Single index.html. Then call done.",
-      "checks": { "selectors": ["button"], "textIncludes": ["7"] }
+      "checks": {
+        "selectors": ["button"],
+        "interactions": [{ "steps": [{ "clickText": "7" }, { "clickText": "+" }, { "clickText": "3" }, { "clickText": "=" }], "expect": [{ "contains": "10", "label": "computing 7 + 3 = shows 10" }] }]
+      }
     },
     {
       "id": "clock",
       "prompt": "Build a live digital clock, centered, that updates every second with vanilla JavaScript and shows the current time. Single index.html. Then call done.",
-      "checks": { "selectors": ["script"], "textIncludes": [":"] }
+      "checks": {
+        "textIncludes": [":"],
+        "interactions": [{ "steps": [{ "waitMs": 1200 }], "expect": [{ "changed": true, "label": "the displayed time advances every second" }] }]
+      }
     },
     {
       "id": "profile",
       "prompt": "Build a profile card: a circular avatar, a name, a short bio line, and a 'Follow' button. Single index.html. Then call done.",
       "checks": { "selectors": ["button"], "textIncludes": ["follow"] }
+    },
+    {
+      "id": "tabs",
+      "prompt": "Build a tabbed panel: three tabs labeled 'Overview', 'Features', and 'Pricing', and below them a content area that shows ONLY the selected tab's paragraph. Clicking a tab reveals its panel and hides the others (vanilla JavaScript). Single index.html. Then call done.",
+      "checks": {
+        "selectors": ["button, [role=tab], a"],
+        "textIncludes": ["overview", "features", "pricing"],
+        "interactions": [{ "steps": [{ "clickText": "Pricing" }], "expect": [{ "changed": true, "label": "clicking Pricing changes the visible panel content" }] }]
+      }
+    },
+    {
+      "id": "charcount",
+      "prompt": "Build a text box with a live character counter below it that shows how many characters have been typed and updates as you type (vanilla JavaScript). Single index.html. Then call done.",
+      "checks": {
+        "selectors": ["input, textarea"],
+        "textIncludes": ["character"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input, textarea", "value": "hello" } }], "expect": [{ "contains": "5", "label": "typing 5 characters shows the count 5" }] }]
+      }
     }
   ]
 }

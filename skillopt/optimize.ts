@@ -29,6 +29,8 @@ const OPT_MODEL = process.env.OXY_OPT_MODEL || TARGET_MODEL;
 const EPOCHS = Number(process.env.OXY_SO_EPOCHS) || 1;
 const BATCH = Number(process.env.OXY_SO_BATCH) || 0; // 0 = whole train set per step
 const MAXITER = Number(process.env.OXY_SO_MAXITER) || 10;
+const VAL_REPEATS = Number(process.env.OXY_SO_VAL_REPEATS) || 3; // median-of-K per val task (gate)
+const MARGIN = Number(process.env.OXY_SO_MARGIN) || 0; // accept only if val beats best by > this noise band
 const SKILL_PATH = path.join(REPO, "skill", "system.md");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -89,7 +91,7 @@ async function main() {
 
   log(`\n=== Oxy SkillOpt ===`);
   log(`target: ${TARGET_ENGINE} (${TARGET_MODEL}) · optimizer: ${OPT_ENGINE} (${OPT_MODEL})`);
-  log(`train: ${trainTasks.length} · val: ${valTasks.length} · epochs: ${EPOCHS} · maxIter: ${MAXITER}\n`);
+  log(`train: ${trainTasks.length} · val: ${valTasks.length} · epochs: ${EPOCHS} · maxIter: ${MAXITER} · valRepeats: ${VAL_REPEATS} · margin: ${MARGIN}\n`);
 
   const stopBackend = await ensureBackend();
   const target = await makeEngine(TARGET_ENGINE, TARGET_MODEL);
@@ -99,31 +101,51 @@ async function main() {
   await target.ensureReady();
   await optimizer.ensureReady();
 
-  const evalSkill = async (skill: string, tasks: Task[]): Promise<EvalResult> => {
-    const rollouts: Rollout[] = [];
-    for (const task of tasks) {
-      // a fresh project per attempt; retry once on a transient transport error
-      // (e.g. "fetch failed") so a blip doesn't zero the task and poison the signal
-      let project = "";
-      let steps: AgentStep[] = [];
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        project = await createProject(`so-${task.id}`, BASE);
-        steps = [];
-        try {
-          await runAgent({ task: task.prompt, project, maxIterations: MAXITER, temperature: 0.6, systemOverride: skill }, { engine: target, executor, onStep: (s) => steps.push(s) });
-          break;
-        } catch (e: any) {
-          log(`      ${task.id}: build error (attempt ${attempt}/2) — ${String(e?.message ?? e).slice(0, 80)}`);
-          if (attempt < 2) await sleep(2000);
-        }
+  // build ONE project for a task (retry once on a transient transport error like
+  // "fetch failed" so a blip doesn't zero the task and poison the signal), then score it.
+  const buildOnce = async (skill: string, task: Task) => {
+    let project = "";
+    let steps: AgentStep[] = [];
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      project = await createProject(`so-${task.id}`, BASE);
+      steps = [];
+      try {
+        await runAgent({ task: task.prompt, project, maxIterations: MAXITER, temperature: 0.6, systemOverride: skill }, { engine: target, executor, onStep: (s) => steps.push(s) });
+        break;
+      } catch (e: any) {
+        log(`      ${task.id}: build error (attempt ${attempt}/2) — ${String(e?.message ?? e).slice(0, 80)}`);
+        if (attempt < 2) await sleep(2000);
       }
-      const finished = steps.at(-1)?.done ?? false;
-      const { score, breakdown } = await scoreProject(path.join(REPO, "workspace", "projects", project), task, { finished });
-      rollouts.push({ task, score, breakdown, toolSummary: toolSummary(steps) });
-      log(`      ${task.id}: ${score.toFixed(2)}  ${breakdown.notes.join("; ") || "clean"}`);
     }
-    const score = rollouts.reduce((a, r) => a + r.score, 0) / (rollouts.length || 1);
-    return { score, rollouts };
+    const finished = steps.at(-1)?.done ?? false;
+    const { score, breakdown } = await scoreProject(path.join(REPO, "workspace", "projects", project), task, { finished });
+    return { score, breakdown, steps };
+  };
+
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+
+  const evalSkill = async (skill: string, tasks: Task[], opts?: { repeats?: number }): Promise<EvalResult> => {
+    const repeats = Math.max(1, opts?.repeats ?? 1);
+    const rollouts: Rollout[] = [];
+    const perTask: Array<{ id: string; score: number }> = [];
+    for (const task of tasks) {
+      const runs = [];
+      for (let r = 0; r < repeats; r++) runs.push(await buildOnce(skill, task));
+      const scores = runs.map((x) => x.score);
+      const med = median(scores);
+      // representative run for optimizer signal: the one closest to the median
+      const rep = runs.reduce((a, b) => (Math.abs(b.score - med) < Math.abs(a.score - med) ? b : a));
+      rollouts.push({ task, score: med, breakdown: rep.breakdown, toolSummary: toolSummary(rep.steps) });
+      perTask.push({ id: task.id, score: med });
+      const spread = repeats > 1 ? ` (median of ${repeats}: ${scores.map((s) => s.toFixed(2)).join("/")})` : "";
+      log(`      ${task.id}: ${med.toFixed(2)}${spread}  ${rep.breakdown.notes.join("; ") || "clean"}`);
+    }
+    const score = perTask.reduce((a, t) => a + t.score, 0) / (perTask.length || 1);
+    return { score, rollouts, perTask };
   };
 
   const proposeEdit = async (skill: string, rollouts: Rollout[]): Promise<string> => {
@@ -158,6 +180,8 @@ async function main() {
     valTasks,
     epochs: EPOCHS,
     batchSize: BATCH,
+    valRepeats: VAL_REPEATS,
+    acceptMargin: MARGIN,
     evalSkill,
     proposeEdit,
     deploy: (skill) => writeFileSync(SKILL_PATH, skill.endsWith("\n") ? skill : skill + "\n", "utf8"),
