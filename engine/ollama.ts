@@ -19,6 +19,15 @@ export interface OllamaEngineOptions {
 
 function toOllamaMessage(m: ChatMessage): any {
   const out: any = { role: m.role, content: m.content };
+  // multimodal input (gemma4 = vision + audio). Ollama takes base64 images on the
+  // message `images` array. Audio uses `audio` — verified live against the running
+  // gemma3n model before relying on it (adjust the field here if Ollama differs).
+  if (m.attachments?.length) {
+    const imgs = m.attachments.filter((a) => a.kind === "image").map((a) => a.data);
+    const auds = m.attachments.filter((a) => a.kind === "audio").map((a) => a.data);
+    if (imgs.length) out.images = imgs;
+    if (auds.length) out.audio = auds;
+  }
   // assistant tool calls go back in Ollama's {function:{name,arguments}} shape
   if (m.role === "assistant" && m.tool_calls?.length) {
     out.tool_calls = m.tool_calls.map((tc) => ({ function: { name: tc.name, arguments: tc.arguments } }));

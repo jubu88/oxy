@@ -57,6 +57,15 @@ export async function saveStitchKey(key: string): Promise<boolean> {
   return !!j.ok;
 }
 
+export interface Attachment {
+  kind: "image" | "audio";
+  mime: string;
+  /** base64 (no data: prefix) */
+  data: string;
+  /** display-only file name */
+  name?: string;
+}
+
 export interface BuildRequest {
   task: string;
   engine: string;
@@ -66,6 +75,8 @@ export interface BuildRequest {
   project?: string;
   /** for engine "openai": the OpenAI-compatible server base URL */
   baseUrl?: string;
+  /** images/audio attached to the prompt (for a multimodal model like gemma4) */
+  attachments?: Attachment[];
 }
 
 /** POST a build and stream NDJSON events back as they happen. */

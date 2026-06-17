@@ -99,6 +99,12 @@ body {
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
   box-shadow: var(--shadow), 0 0 0 3px rgba(70, 72, 212, 0.08);
 }
+.prompt-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
 .prompt textarea {
   flex: 1;
   background: transparent;
@@ -115,6 +121,67 @@ body {
 }
 .prompt textarea::placeholder {
   color: var(--outline);
+}
+/* attachments (images/audio) for a multimodal model */
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 8px;
+}
+.attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px dashed color-mix(in srgb, var(--outline-variant) 60%, transparent);
+  border-radius: var(--radius-xl);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.attach-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.attach-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 200px;
+  padding: 4px 6px 4px 8px;
+  background: var(--surface-low);
+  border: 1px solid color-mix(in srgb, var(--outline-variant) 35%, transparent);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text);
+}
+.attach-chip .material-symbols-outlined {
+  font-size: 15px;
+  color: var(--primary);
+}
+.attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-x {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.attach-x:hover {
+  color: var(--error);
 }
 .build-btn {
   flex-shrink: 0;

@@ -22,9 +22,20 @@ export interface ToolCall {
   arguments: any;
 }
 
+/** Multimodal input attached to a (user) message — images/audio for a vision/audio
+ *  model like gemma4. `data` is raw base64 (no `data:` URL prefix). */
+export interface Attachment {
+  kind: "image" | "audio";
+  /** MIME type, e.g. "image/png", "audio/wav" */
+  mime: string;
+  data: string;
+}
+
 export interface ChatMessage {
   role: Role;
   content: string;
+  /** multimodal input (images/audio) — typically only on the first user turn */
+  attachments?: Attachment[];
   /** for role:"tool" — the tool whose result this is */
   tool_name?: string;
   /** for role:"assistant" — tool calls the model emitted this turn */

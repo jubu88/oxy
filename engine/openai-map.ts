@@ -18,7 +18,18 @@ export function toOpenAIMessages(messages: ChatMessage[]): any[] {
   let pendingIds: string[] = []; // ids of the current assistant's tool_calls awaiting results
 
   for (const m of messages) {
-    if (m.role === "system" || m.role === "user") {
+    if (m.role === "user" && m.attachments?.length) {
+      // multimodal user turn → OpenAI content-parts (image_url / input_audio).
+      // Needs a vision/audio server (llama-server with --mmproj, or Ollama's /v1).
+      const parts: any[] = [];
+      if (m.content) parts.push({ type: "text", text: m.content });
+      for (const a of m.attachments) {
+        if (a.kind === "image") parts.push({ type: "image_url", image_url: { url: `data:${a.mime};base64,${a.data}` } });
+        else if (a.kind === "audio") parts.push({ type: "input_audio", input_audio: { data: a.data, format: a.mime.split("/")[1] || "wav" } });
+      }
+      out.push({ role: "user", content: parts });
+      pendingIds = [];
+    } else if (m.role === "system" || m.role === "user") {
       out.push({ role: m.role, content: m.content });
       pendingIds = [];
     } else if (m.role === "assistant") {

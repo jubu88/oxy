@@ -48,6 +48,32 @@ test("toOpenAIMessages passes through string assistant arguments and plain turns
   assert.equal(out[1].role, "user");
 });
 
+test("toOpenAIMessages maps a multimodal user turn to content parts (image + audio)", () => {
+  const out = toOpenAIMessages([
+    {
+      role: "user",
+      content: "build from this",
+      attachments: [
+        { kind: "image", mime: "image/png", data: "AAAA" },
+        { kind: "audio", mime: "audio/wav", data: "BBBB" },
+      ],
+    },
+  ]);
+  assert.equal(out.length, 1);
+  const parts = out[0].content;
+  assert.ok(Array.isArray(parts));
+  assert.deepEqual(parts[0], { type: "text", text: "build from this" });
+  assert.equal(parts[1].type, "image_url");
+  assert.equal(parts[1].image_url.url, "data:image/png;base64,AAAA");
+  assert.equal(parts[2].type, "input_audio");
+  assert.deepEqual(parts[2].input_audio, { data: "BBBB", format: "wav" });
+});
+
+test("toOpenAIMessages leaves a plain user turn (no attachments) as a string", () => {
+  const out = toOpenAIMessages([{ role: "user", content: "plain" }]);
+  assert.equal(out[0].content, "plain");
+});
+
 test("finalizeToolCalls assembles streamed fragments and parses arguments", () => {
   const frags = new Map<number, { name: string; args: string }>();
   frags.set(0, { name: "write_file", args: '{"path":"index.html","content":"<h1>hi</h1>"}' });

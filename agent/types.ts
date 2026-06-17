@@ -4,6 +4,9 @@
 // execution) depends ONLY on these types and on the Engine interface
 // (engine/engine.ts) — never on a concrete backend. That independence is the
 // whole point of the orchestration layer.
+import type { Attachment } from "../engine/engine.ts";
+
+export type { Attachment };
 
 /** One executed tool call plus the short string result fed back to the model. */
 export interface ToolCallRecord {
@@ -66,6 +69,8 @@ export interface AgentConfig {
    * the loop uses the built-in SYSTEM seed (or a deployed skill/system.md).
    */
   systemOverride?: string;
+  /** images/audio attached to the build prompt (for a multimodal model, e.g. gemma4) */
+  attachments?: Attachment[];
 }
 
 /** A file on disk in a project, as the backend reports it. */

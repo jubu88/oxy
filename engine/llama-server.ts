@@ -43,6 +43,8 @@ export interface LlamaServerOptions {
   contextSize?: number;
   /** GPU layers to offload (auto: 0 for cpu, all for gpu variants) */
   gpuLayers?: number;
+  /** multimodal projector (.gguf) for vision/audio; auto-detected next to a local model */
+  mmproj?: string;
 }
 
 async function extractArchive(archive: string, destDir: string): Promise<void> {
@@ -165,6 +167,7 @@ export class LlamaServerEngine implements Engine {
   private contextSize: number;
   private gpuLayers = 0;
   private nglOverride: number | null;
+  private mmproj: string | null;
   private child: ChildProcess | null = null;
   private inner: OpenAICompatEngine | null = null;
   private ready = false;
@@ -176,6 +179,22 @@ export class LlamaServerEngine implements Engine {
     this.port = opts.port ?? (process.env.OXY_LLAMA_PORT ? Number(process.env.OXY_LLAMA_PORT) : 8080);
     this.contextSize = opts.contextSize ?? (process.env.OXY_LLAMA_CTX ? Number(process.env.OXY_LLAMA_CTX) : 16384);
     this.nglOverride = opts.gpuLayers ?? (process.env.OXY_LLAMA_NGL ? Number(process.env.OXY_LLAMA_NGL) : null);
+    this.mmproj = opts.mmproj ?? process.env.OXY_LLAMA_MMPROJ ?? null;
+  }
+
+  // Multimodal projector for vision/audio. Explicit option/env wins; otherwise, for
+  // a local -m model, auto-use a sibling mmproj-*.gguf (enables gemma4 vision). For
+  // an -hf model, llama.cpp auto-loads the repo's projector, so we pass nothing.
+  private resolveMmproj(): string | null {
+    if (this.mmproj) return this.mmproj;
+    if (this.modelRef.startsWith("hf:") || /^https?:\/\//i.test(this.modelRef)) return null;
+    try {
+      const dir = path.dirname(this.modelRef);
+      const hit = fs.readdirSync(dir).find((f) => /mmproj.*\.gguf$/i.test(f));
+      return hit ? path.join(dir, hit) : null;
+    } catch {
+      return null;
+    }
   }
 
   get activeModel(): string {
@@ -230,6 +249,11 @@ export class LlamaServerEngine implements Engine {
       "-ngl", String(this.gpuLayers),
       "--jinja", // use the model's embedded chat template (gemma tool-calling format)
     ];
+    const mmproj = this.resolveMmproj();
+    if (mmproj) {
+      args.push("--mmproj", mmproj);
+      console.log(`[oxy] llama-server multimodal projector: ${path.basename(mmproj)}`);
+    }
     let stderrTail = "";
     this.child = spawn(bin, args, { windowsHide: true });
     this.child.stderr?.on("data", (d) => (stderrTail = (stderrTail + d).slice(-800)));

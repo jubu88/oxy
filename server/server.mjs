@@ -435,7 +435,7 @@ function readBody(req) {
     let data = "";
     req.on("data", (c) => {
       data += c;
-      if (data.length > 2 * 1024 * 1024) reject(new Error("body too large"));
+      if (data.length > 25 * 1024 * 1024) reject(new Error("body too large")); // generous: base64 images/audio attachments
     });
     req.on("end", () => {
       try {
@@ -555,6 +555,10 @@ export async function codelabHandler(req, res, next) {
         // use the deployed (e.g. SkillOpt-tuned) skill if present
         const skillPath = path.resolve(ROOT, "skill", "system.md");
         const systemOverride = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
+        // multimodal attachments (images/audio) from the client — validate the shape
+        const attachments = Array.isArray(body.attachments)
+          ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
+          : undefined;
         let lastTok = 0;
         await runAgent(
           {
@@ -565,6 +569,7 @@ export async function codelabHandler(req, res, next) {
             useStitch: !!body.useStitch,
             iterate,
             systemOverride,
+            attachments: attachments && attachments.length ? attachments : undefined,
           },
           {
             engine,

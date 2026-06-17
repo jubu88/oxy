@@ -67,7 +67,9 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   }
   const messages: ChatMessage[] = [
     { role: "system", content: system },
-    { role: "user", content: initialUser },
+    // attachments (images/audio) ride on the first user turn; after a compaction
+    // the resume seed is text-only (the built files carry the result forward)
+    { role: "user", content: initialUser, attachments: config.attachments?.length ? config.attachments : undefined },
   ];
 
   // ---- auto-compact + thinking-burst (engine-owned state; never round-tripped through the model) ----

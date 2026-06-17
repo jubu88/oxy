@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStep } from "../agent/types.ts";
 import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
-import { exportUrl, getProjects, getStatus, previewUrl, runBuild, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
+import { exportUrl, getProjects, getStatus, previewUrl, runBuild, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
 const NUM_CTX = 16384; // matches the loop's context budget
 
@@ -89,7 +89,9 @@ export function App() {
   const [project, setProject] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [previewKey, setPreviewKey] = useState(0);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     getStatus()
@@ -147,7 +149,7 @@ export function App() {
     let builtId = selProject || "";
     try {
       await runBuild(
-        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined },
+        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: BuildEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "project") {
@@ -179,6 +181,33 @@ export function App() {
     setBuilding(false);
   };
 
+  // read attached image/audio files as base64 (gemma4 is multimodal)
+  async function onFiles(files: FileList | null) {
+    if (!files) return;
+    const next: Attachment[] = [];
+    for (const f of Array.from(files)) {
+      const kind = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "audio" : null;
+      if (!kind) {
+        setError(`${f.name}: only image or audio files can be attached`);
+        continue;
+      }
+      if (f.size > 12 * 1024 * 1024) {
+        setError(`${f.name} is too large (max 12 MB)`);
+        continue;
+      }
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? ""); // strip the data:…;base64, prefix
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(f);
+      });
+      next.push({ kind, mime: f.type, data, name: f.name });
+    }
+    if (next.length) setAttachments((prev) => [...prev, ...next].slice(0, 6));
+    if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
+  }
+  const removeAttachment = (i: number) => setAttachments((prev) => prev.filter((_, j) => j !== i));
+
   return (
     <>
       <Background />
@@ -203,6 +232,7 @@ export function App() {
         </header>
 
         <section className="prompt">
+          <div className="prompt-main">
           <textarea
             value={task}
             onChange={(e) => setTask(e.target.value)}
@@ -211,6 +241,22 @@ export function App() {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build();
             }}
           />
+          <div className="attach-row">
+            <button className="attach-btn" type="button" onClick={() => fileRef.current?.click()} title="attach an image or audio file (gemma4 is multimodal)">
+              <span className="material-symbols-outlined">attach_file</span>
+            </button>
+            <input ref={fileRef} type="file" accept="image/*,audio/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
+            {attachments.map((a, i) => (
+              <span key={i} className="attach-chip" title={a.name}>
+                <span className="material-symbols-outlined">{a.kind === "image" ? "image" : "graphic_eq"}</span>
+                <span className="attach-name">{a.name || a.kind}</span>
+                <button className="attach-x" type="button" onClick={() => removeAttachment(i)} title="remove">
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+          </div>
           {building ? (
             <button className="build-btn stop" onClick={stop}>
               Stop
