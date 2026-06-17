@@ -560,6 +560,8 @@ export async function codelabHandler(req, res, next) {
           ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
           : undefined;
         let lastTok = 0;
+        const toolLog = []; // for the continuous-improvement supervisor review
+        let finished = false;
         await runAgent(
           {
             task,
@@ -575,7 +577,11 @@ export async function codelabHandler(req, res, next) {
             engine,
             executor,
             signal: ac.signal,
-            onStep: (s) => send({ type: "step", step: s }),
+            onStep: (s) => {
+              for (const t of s.toolCalls) toolLog.push(t.name);
+              if (s.done) finished = true;
+              send({ type: "step", step: s });
+            },
             onProgress: (p) => {
               if (p.tokens - lastTok >= 25) {
                 lastTok = p.tokens;
@@ -585,6 +591,25 @@ export async function codelabHandler(req, res, next) {
           },
         );
         send({ type: "done", project });
+        // continuous improvement: review THIS build in the background (best-effort,
+        // never blocks the response). watch-always; deploy stays gated (promote.ts).
+        if (process.env.OXY_SUPERVISOR !== "0" && !ac.signal.aborted) {
+          (async () => {
+            try {
+              const { reviewBuild } = await import("../skillopt/supervisor.ts");
+              const { OllamaEngine } = await import("../engine/ollama.ts");
+              const sup = new OllamaEngine({ model: process.env.OXY_SUPERVISOR_MODEL || process.env.OXY_OPT_MODEL || "gpt-oss:120b-cloud" });
+              await sup.ensureReady();
+              let fileCount = 0;
+              try {
+                fileCount = fs.readdirSync(path.join(PROJECTS, project)).filter((f) => !f.startsWith(".codelab")).length;
+              } catch {}
+              await reviewBuild({ task, project, toolLog, finished, errors: [], fileCount, iterate }, sup, systemOverride ?? "");
+            } catch {
+              /* supervisor is best-effort; never affects the build */
+            }
+          })();
+        }
       } catch (e) {
         send({ type: "error", message: String(e?.message ?? e) });
       } finally {

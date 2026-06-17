@@ -12,6 +12,8 @@ workspace/projects/*
 *.log
 last-run.json
 skillopt/last-opt.json
+# continuous-improvement journal (real-build supervisor reviews) — local signal
+skillopt/journal.jsonl
 # A/B run artifacts + frozen pre-optimization skill copy
 skillopt/ab-report/
 skill/system.seed.md

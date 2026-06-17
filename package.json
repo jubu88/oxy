@@ -9,11 +9,13 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test agent/loop.test.ts engine/tool-parse.test.ts engine/openai-map.test.ts skillopt/score.test.ts skillopt/loop.test.ts",
+    "test": "node --test agent/loop.test.ts engine/tool-parse.test.ts engine/openai-map.test.ts skillopt/score.test.ts skillopt/loop.test.ts skillopt/supervisor.test.ts",
     "oxy": "node driver/run-build.ts",
     "serve": "node server/serve.mjs",
     "skillopt": "node skillopt/optimize.ts",
-    "skillopt:ab": "node skillopt/ab.ts"
+    "skillopt:ab": "node skillopt/ab.ts",
+    "skillopt:promote": "node skillopt/promote.ts",
+    "setup-sd": "node scripts/setup-sd.mjs"
   },
   "dependencies": {
     "react": "^19",
