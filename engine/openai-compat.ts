@@ -7,7 +7,7 @@
 // one adapter, many backends — without leaving the Engine abstraction.
 import type { ChatMessage, Engine, EngineModelInfo, GenerateOptions, GenerateResult, ToolCall, ToolDef } from "./engine.ts";
 import { finalizeToolCalls, toOpenAIMessages, toOpenAITools } from "./openai-map.ts";
-import { parseTextToolCalls } from "./node-llama-map.ts";
+import { parseTextToolCalls } from "./tool-parse.ts";
 
 const DEFAULT_BASE = "http://localhost:8080/v1"; // llama.cpp llama-server default
 

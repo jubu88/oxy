@@ -3,11 +3,11 @@
 // Ollama path. It auto-starts the standalone backend if one isn't already
 // running, creates a fresh project, runs the loop, and writes last-run.json.
 //
-//   node driver/run-build.ts
+//   node driver/run-build.ts                                  # managed llama-server + gemma4
 //   OXY_ENGINE=ollama OXY_MODEL=gemma4:e4b OXY_TASK="build a ..." node driver/run-build.ts
-//   OXY_ENGINE=node-llama node driver/run-build.ts          # in-process llama.cpp
+//   OXY_ENGINE=openai OXY_OPENAI_BASE=http://localhost:8080/v1 node driver/run-build.ts
 //
-// Env: OXY_ENGINE (ollama|node-llama), OXY_MODEL, OXY_TASK, OXY_MAX_ITER,
+// Env: OXY_ENGINE (llama-server|ollama|openai), OXY_MODEL, OXY_TASK, OXY_MAX_ITER,
 //      OXY_TEMP, OXY_BASE (backend origin), OXY_USE_STITCH=1.
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -23,7 +23,7 @@ import { OllamaEngine } from "../engine/ollama.ts";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
 
-const ENGINE = process.env.OXY_ENGINE || "ollama";
+const ENGINE = process.env.OXY_ENGINE || "llama-server";
 const MODEL = process.env.OXY_MODEL || "gemma4:e4b";
 const TASK =
   process.env.OXY_TASK ||
@@ -68,10 +68,6 @@ async function ensureBackend(): Promise<() => void> {
 }
 
 async function makeEngine(): Promise<Engine> {
-  if (ENGINE === "node-llama") {
-    const { NodeLlamaEngine } = await import("../engine/node-llama.ts");
-    return new NodeLlamaEngine({ modelRef: process.env.OXY_MODEL });
-  }
   if (ENGINE === "openai") {
     const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
     return new OpenAICompatEngine({ baseUrl: process.env.OXY_OPENAI_BASE, model: process.env.OXY_MODEL || MODEL, apiKey: process.env.OXY_OPENAI_KEY });

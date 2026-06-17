@@ -12,9 +12,19 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { resolveModelFile } from "node-llama-cpp";
 import type { ChatMessage, Engine, EngineModelInfo, GenerateOptions, GenerateResult, ToolDef } from "./engine.ts";
 import { OpenAICompatEngine } from "./openai-compat.ts";
+
+// Turn a model ref into llama-server model args. llama-server fetches HF models
+// itself (-hf), so Oxy needs no separate downloader (and no node-llama-cpp):
+//   hf:org/repo:quant -> -hf org/repo:quant   (downloaded + cached by llama-server)
+//   https://….gguf    -> -mu <url>
+//   /local/path.gguf   -> -m <path>
+function modelArgs(ref: string): string[] {
+  if (ref.startsWith("hf:")) return ["-hf", ref.slice(3)];
+  if (/^https?:\/\//i.test(ref)) return ["-mu", ref];
+  return ["-m", ref];
+}
 
 const execFileP = promisify(execFile);
 
@@ -212,9 +222,8 @@ export class LlamaServerEngine implements Engine {
   private async boot(): Promise<void> {
     console.log(`[oxy] llama-server backend: ${this.variant} (${this.gpuLayers > 0 ? "GPU-offload" : "CPU"})`);
     const bin = await ensureBinary(this.variant);
-    const modelPath = await resolveModelFile(this.modelRef);
     const args = [
-      "-m", modelPath,
+      ...modelArgs(this.modelRef),
       "--host", "127.0.0.1",
       "--port", String(this.port),
       "-c", String(this.contextSize),
@@ -226,7 +235,8 @@ export class LlamaServerEngine implements Engine {
     this.child.stderr?.on("data", (d) => (stderrTail = (stderrTail + d).slice(-800)));
     this.child.on("error", (e) => (stderrTail += `\n${e.message}`));
     try {
-      await this.waitForHealth(240_000); // model load can be slow
+      // generous: first run may download a multi-GB GGUF via -hf before serving
+      await this.waitForHealth(900_000);
     } catch (e: any) {
       this.child?.kill();
       this.child = null;

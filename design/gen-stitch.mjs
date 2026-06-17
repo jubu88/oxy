@@ -1,7 +1,8 @@
-// Generates Oxy's interface design with Google Stitch (cloud) and saves the raw
-// HTML to design/stitch-ui.html as the design reference the React UI is built
-// from. The Stitch API key is read by server.mjs from stitch.key.local (never
-// committed). Run: node design/gen-stitch.mjs
+// Generates Oxy's interface design with Google Stitch (cloud). Produces two
+// candidates (Stitch varies per run) so we can pick the strongest, then the
+// chosen one becomes the design we implement faithfully. The Stitch API key is
+// read by server.mjs from stitch.key.local (never committed).
+// Run: node design/gen-stitch.mjs
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -9,21 +10,41 @@ import { stitchGenerate } from "../server/server.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-const PROMPT = `Design the interface for "Oxy" — a local-first AI app builder where a language model running entirely on the user's own machine builds web (and soon mobile) apps for them. Make it FUTURISTIC and alive — a high-tech command deck, not a plain form.
+const PROMPT = `Design the desktop interface for "Oxy" — a local-first AI app builder where a model on your own machine builds web apps for you. Modern, sleek, a little futuristic — BUT legibility and contrast come FIRST.
 
-Aesthetic: deep-space DARK theme. A subtle ANIMATED background — a slow-drifting aurora/nebula gradient in the far background with a faint glowing grid or drifting particles over it, very low contrast so it never fights the content. Glassmorphism panels: frosted, translucent, with thin luminous 1px borders and soft inner glow. Neon accents — electric cyan and violet — used sparingly for focus, active states and glows. Smooth micro-animations: gentle hover glows, a pulsing "live" indicator on the active build step, subtle entrance fades. A refined geometric sans-serif for UI, a crisp monospace for code/labels. Confident, cinematic, but clean and uncluttered — generous spacing.
+CRITICAL — make every component obviously distinct and readable:
+- Strong CONTRAST everywhere. All text must be easily readable against its background (aim for WCAG AA: ~4.5:1 for normal text, ~3:1 for large text and UI borders). No low-contrast grey-on-grey.
+- Clearly SEPARATED surfaces at distinct elevation levels: the page background, raised cards/panels, and inputs must each be a VISIBLY different shade so you can instantly tell them apart. Do NOT make everything the same color or rely on faint translucency — use solid fills, clear 1px borders, and subtle shadows to delineate every component.
+- A clear visual HIERARCHY: the prompt input and primary button are the focal point; secondary controls are visibly quieter but still readable.
+- ONE vivid, high-contrast accent color used for the primary button and the active state, so it pops against everything else.
 
-Layout: a centered column (~840px) over the animated background. Sections, top to bottom:
-1. A top bar: the glowing "Oxy" wordmark on the left with a one-line subtitle "build apps with a local model"; on the right a small projects dropdown ("New project ▾") and a settings gear icon button.
-2. A large frosted-glass prompt input with placeholder "Describe the app you want to build…" and a glowing primary "Build" button; below it small ghost helper text "or pick a project above to keep iterating".
-3. A status row: a glass pill on the left with a tiny pulsing dot showing the active engine + model (e.g. "node-llama-cpp · qwen2.5-coder"), and on the right a thin neon "context" progress bar with a % label (how full the model's context window is).
-4. A "Build progress" panel: a vertical timeline of glass step cards connected by a glowing line. Each card: a small circular node icon, a monospace label for the tool (e.g. "write_file · index.html", "get_design_system · modern-saas", "review_design"), and tiny glowing pill tags like "thinking" and "compacted". Show 4-5 steps; the latest one highlighted with a cyan glow and a pulsing node.
-5. A preview panel as a sleek browser-like frame with a faux address bar and a ghost "Export .zip" button; inside, a placeholder of the generated app.
+Use a clean dark theme (deep slate background, clearly lighter raised cards, crisp light text) OR a clean light theme — whichever gives the strongest contrast. A refined sans-serif for UI, a mono for code/labels.
 
-No ads, no clutter. Futuristic, animated, premium. Desktop layout.`;
+Layout — a centered ~840px column, sections top to bottom:
+1. Top bar: a bold "Oxy" wordmark + one-line subtitle on the left; a "New project" dropdown and a settings gear button on the right.
+2. A large, clearly-bordered prompt input with placeholder "Describe the app you want to build…" and a prominent high-contrast primary "Build" button.
+3. A status row: a clearly-bordered pill on the left showing the engine + model (e.g. "llama-server · gemma4"), and on the right a labelled "context" progress bar.
+4. A "Build progress" panel: a vertical timeline of clearly-separated step cards (each a raised card with a 1px border), each showing a small icon, a monospace tool label (e.g. "write_file · index.html"), and small high-contrast pill tags ("thinking", "compacted"). Show 4 steps; the latest highlighted with the accent color and a clear glow/border so it stands out from the rest.
+5. A preview panel as a browser-style frame (faux address bar) with a "Export .zip" button, containing a placeholder of the generated page.
 
-console.log("[stitch] generating Oxy UI design (cloud, ~1-3 min)…");
-const r = await stitchGenerate(PROMPT, { deviceType: "DESKTOP", title: "Oxy UI" });
-const out = path.join(HERE, "stitch-ui.html");
-writeFileSync(out, r.html, "utf8");
-console.log(`[stitch] wrote ${out} — ${r.html.length} bytes in ${r.seconds}s (stitch project ${r.stitchProjectId})`);
+Premium, crisp, high-contrast. Every element easy to see and tell apart.`;
+
+async function gen(label) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      console.log(`[stitch] generating candidate ${label} (attempt ${attempt})…`);
+      const r = await stitchGenerate(PROMPT, { deviceType: "DESKTOP", title: `Oxy UI ${label}` });
+      const out = path.join(HERE, `stitch-${label}.html`);
+      writeFileSync(out, r.html, "utf8");
+      console.log(`[stitch] wrote ${out} — ${r.html.length} bytes in ${r.seconds}s`);
+      return;
+    } catch (e) {
+      console.log(`[stitch] candidate ${label} attempt ${attempt} failed: ${String(e?.message ?? e)}`);
+      if (attempt === 3) throw e;
+    }
+  }
+}
+
+await gen("a");
+await gen("b");
+console.log("[stitch] done — review design/stitch-a.html and design/stitch-b.html");

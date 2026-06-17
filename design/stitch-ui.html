@@ -1,142 +1,304 @@
 <!DOCTYPE html>
 
-<html lang="en">
-<head>
+<html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
-<meta content="width=device-width,initial-scale=1.0" name="viewport"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Oxy | Local-first AI Builder</title>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-fixed-dim": "#ffb783",
+                    "on-primary": "#1000a9",
+                    "outline": "#908fa0",
+                    "surface-container-lowest": "#0d0d15",
+                    "secondary-container": "#39485a",
+                    "on-surface": "#e4e1ed",
+                    "on-secondary": "#233143",
+                    "surface-container-low": "#1b1b23",
+                    "on-tertiary-fixed-variant": "#703700",
+                    "on-primary-container": "#0d0096",
+                    "surface-dim": "#13131b",
+                    "primary-fixed-dim": "#c0c1ff",
+                    "surface": "#13131b",
+                    "on-tertiary": "#4f2500",
+                    "on-secondary-fixed": "#0d1c2d",
+                    "on-background": "#e4e1ed",
+                    "on-primary-fixed": "#07006c",
+                    "on-surface-variant": "#c7c4d7",
+                    "primary": "#c0c1ff",
+                    "on-secondary-container": "#a7b6cc",
+                    "surface-container-highest": "#34343d",
+                    "surface-tint": "#c0c1ff",
+                    "surface-bright": "#393841",
+                    "on-tertiary-container": "#452000",
+                    "error": "#ffb4ab",
+                    "on-secondary-fixed-variant": "#39485a",
+                    "background": "#13131b",
+                    "on-tertiary-fixed": "#301400",
+                    "inverse-primary": "#494bd6",
+                    "error-container": "#93000a",
+                    "surface-container": "#1f1f27",
+                    "tertiary": "#ffb783",
+                    "on-error-container": "#ffdad6",
+                    "secondary-fixed-dim": "#b9c8de",
+                    "secondary-fixed": "#d4e4fa",
+                    "inverse-on-surface": "#303038",
+                    "secondary": "#b9c8de",
+                    "on-error": "#690005",
+                    "primary-fixed": "#e1e0ff",
+                    "surface-container-high": "#292932",
+                    "tertiary-container": "#d97721",
+                    "primary-container": "#8083ff",
+                    "on-primary-fixed-variant": "#2f2ebe",
+                    "inverse-surface": "#e4e1ed",
+                    "tertiary-fixed": "#ffdcc5",
+                    "surface-variant": "#34343d",
+                    "outline-variant": "#464554",
+                    "brand-slate": "#0F172A",
+                    "brand-panel": "#1E293B",
+                    "brand-border": "#334155",
+                    "brand-indigo": "#6366F1"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "base": "4px",
+                    "gutter": "16px",
+                    "md": "16px",
+                    "xs": "4px",
+                    "sm": "8px",
+                    "margin-desktop": "32px",
+                    "xl": "32px",
+                    "lg": "24px",
+                    "margin-mobile": "16px"
+            },
+            "fontFamily": {
+                    "display-lg": ["Inter"],
+                    "body-sm": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "code-md": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "label-caps": ["JetBrains Mono"]
+            },
+            "fontSize": {
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "code-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
 <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: #000;
-    }
-  </style>
+        body {
+            background-color: #0F172A;
+            color: #e4e1ed;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0F172A;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+        .step-active-border {
+            border-left: 2px solid #6366F1;
+        }
+        @keyframes spin-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+            animation: spin-slow 2s linear infinite;
+        }
+    </style>
 </head>
-<body>
-<!-- STITCH_SHADER_START:ANIMATION_1 class="fixed inset-0 w-full h-full" -->
-<div class="fixed inset-0 w-full h-full" style="display:block;">
-<canvas id="shader-canvas-ANIMATION_1" style="display:block;width:100%;height:100%"></canvas>
-<script>
-(function() {
-  const canvas = document.getElementById('shader-canvas-ANIMATION_1');
-
-  // Sync the WebGL drawing-buffer size with the CSS-driven layout size.
-  // This fires on initial layout and whenever the element is resized.
-  function syncSize() {
-    const w = canvas.clientWidth  || 1280;
-    const h = canvas.clientHeight || 720;
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width  = w;
-      canvas.height = h;
-    }
-  }
-  if (typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(syncSize).observe(canvas);
-  }
-  syncSize();
-
-  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-  if (!gl) return;
-  const vs = `attribute vec2 a_position;
-varying vec2 v_texCoord;
-void main() {
-  v_texCoord = a_position * 0.5 + 0.5;
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}`;
-  const fs = `precision highp float;
-uniform float u_time;
-uniform vec2 u_resolution;
-varying vec2 v_texCoord;
-
-float noise(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-void main() {
-    vec2 uv = v_texCoord;
-    vec2 p = uv - 0.5;
-    p.x *= u_resolution.x / u_resolution.y;
-
-    // Drifting nebula colors
-    vec3 color1 = vec3(0.02, 0.05, 0.1); // Deep Navy
-    vec3 color2 = vec3(0.1, 0.02, 0.15); // Deep Violet
-    vec3 accent = vec3(0.0, 0.2, 0.3);   // Subtle Cyan glow
-
-    float drift = u_time * 0.05;
-    float n = noise(uv + drift);
-    
-    // Smooth aurora/nebula gradient
-    float mask = smoothstep(0.2, 0.8, sin(uv.x * 2.0 + drift) * 0.5 + 0.5);
-    vec3 nebula = mix(color1, color2, mask);
-    nebula += accent * (0.1 / (length(p - vec2(sin(drift), cos(drift)) * 0.3) + 0.5));
-
-    // Subtle drifting grid
-    vec2 gridUv = uv * 40.0;
-    gridUv.y += u_time * 0.2;
-    vec2 grid = abs(fract(gridUv - 0.5) - 0.5) / fwidth(gridUv);
-    float gridLine = 1.0 - min(grid.x, grid.y);
-    nebula += gridLine * 0.015;
-
-    // Drifting particles
-    for(float i=0.0; i<10.0; i++) {
-        vec2 pos = vec2(noise(vec2(i, 1.0)), noise(vec2(i, 2.0)));
-        pos.y = fract(pos.y - u_time * 0.02);
-        float dist = length(uv - pos);
-        nebula += 0.001 / (dist + 0.005);
-    }
-
-    gl_FragColor = vec4(nebula, 1.0);
-}`;
-  function cs(type, src) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    return s;
-  }
-  const prog = gl.createProgram();
-  gl.attachShader(prog, cs(gl.VERTEX_SHADER, vs));
-  gl.attachShader(prog, cs(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(prog);
-  gl.useProgram(prog);
-  const buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-  const pos = gl.getAttribLocation(prog, 'a_position');
-  gl.enableVertexAttribArray(pos);
-  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-  const uTime = gl.getUniformLocation(prog, 'u_time');
-  const uRes = gl.getUniformLocation(prog, 'u_resolution');
-  const uMouse = gl.getUniformLocation(prog, 'u_mouse');
-
-  // u_mouse is in pixel coordinates matching u_resolution (ShaderToy convention).
-  // Shaders that need normalized coords should use: u_mouse / u_resolution.
-  let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
-  window.addEventListener('mousemove', (event) => {
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width && rect.height) {
-      const nx = (event.clientX - rect.left) / rect.width;
-      const ny = 1.0 - (event.clientY - rect.top) / rect.height;
-      mouse.x = nx * canvas.width;
-      mouse.y = ny * canvas.height;
-    }
-  });
-
-  function render(t) {
-    if (typeof ResizeObserver === 'undefined') syncSize();
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    if (uTime) gl.uniform1f(uTime, t * 0.001);
-    if (uRes) gl.uniform2f(uRes, canvas.width, canvas.height);
-    if (uMouse) gl.uniform2f(uMouse, mouse.x, mouse.y);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    requestAnimationFrame(render);
-  }
-  render(0);
-})();
-</script>
+<body class="font-body-md text-body-md selection:bg-brand-indigo/30 selection:text-white">
+<!-- TopNavBar -->
+<header class="bg-background dark:bg-background border-b border-outline-variant dark:border-outline-variant fixed top-0 w-full z-50">
+<div class="flex justify-between items-center max-w-[840px] mx-auto px-lg py-md w-full">
+<div class="flex items-baseline gap-sm">
+<h1 class="text-headline-md font-headline-md font-bold text-on-background dark:text-on-background tracking-tight">Oxy</h1>
+<span class="font-body-sm text-body-sm text-on-surface-variant opacity-70">Local-first AI Builder</span>
 </div>
-<!-- STITCH_SHADER_END:ANIMATION_1 -->
-</body>
-</html>
+<div class="flex items-center gap-md">
+<nav class="hidden md:flex gap-lg mr-md">
+<a class="text-primary dark:text-primary font-bold border-b-2 border-primary pb-1 cursor-pointer active:opacity-80 transition-colors duration-200" href="#">Projects</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary dark:hover:text-primary transition-colors duration-200 cursor-pointer active:opacity-80" href="#">Models</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary dark:hover:text-primary transition-colors duration-200 cursor-pointer active:opacity-80" href="#">Settings</a>
+</nav>
+<div class="flex items-center gap-sm">
+<button class="bg-brand-indigo hover:bg-brand-indigo/90 text-white px-md py-sm rounded-lg font-bold text-body-sm transition-all active:scale-95 flex items-center gap-xs">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                        New project
+                    </button>
+<button class="text-on-surface-variant hover:text-primary p-xs transition-colors">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-[840px] mx-auto px-lg pt-[100px] pb-xl min-h-screen">
+<!-- Main Prompt Area -->
+<section class="mb-lg">
+<div class="bg-brand-panel border border-brand-border rounded-xl p-md shadow-lg transition-all focus-within:border-brand-indigo/50">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-body-lg font-body-lg placeholder:text-on-surface-variant/40 min-h-[120px] resize-none custom-scrollbar" placeholder="Describe the app you want to build..."></textarea>
+<div class="flex justify-end mt-sm">
+<button class="bg-brand-indigo hover:bg-brand-indigo/90 text-white px-xl py-sm rounded-lg font-bold text-body-md transition-all active:scale-95 shadow-[0_0_20px_rgba(99,102,241,0.2)]">
+                        Build
+                    </button>
+</div>
+</div>
+</section>
+<!-- Status Bar -->
+<section class="flex flex-col md:flex-row justify-between items-center gap-md mb-xl px-xs">
+<div class="flex items-center gap-sm">
+<div class="border border-brand-border bg-brand-panel/50 px-md py-xs rounded-full flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+<span class="font-code-md text-code-md text-on-surface-variant">llama-server · gemma4</span>
+</div>
+</div>
+<div class="flex items-center gap-md w-full md:w-auto">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">Context</span>
+<div class="flex items-center gap-sm flex-1 md:w-48">
+<div class="h-1.5 w-full bg-brand-border rounded-full overflow-hidden">
+<div class="h-full bg-brand-indigo rounded-full w-[45%] shadow-[0_0_8px_rgba(99,102,241,0.4)]"></div>
+</div>
+<span class="font-code-md text-code-md text-on-surface-variant min-w-[32px]">45%</span>
+</div>
+</div>
+</section>
+<!-- Build Progress Panel -->
+<section class="space-y-md">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mb-sm ml-xs">Build Process</h3>
+<!-- Card 1: Completed -->
+<div class="bg-brand-panel border border-brand-border rounded-lg p-md shadow-sm flex gap-md items-start opacity-80 hover:opacity-100 transition-opacity">
+<div class="mt-1">
+<span class="material-symbols-outlined text-green-500" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex-1 space-y-xs">
+<div class="flex justify-between items-center">
+<span class="font-code-md text-code-md text-brand-indigo bg-brand-indigo/10 px-sm py-[2px] rounded">read_file · package.json</span>
+<span class="font-code-md text-[12px] text-on-surface-variant opacity-40">0.2s</span>
+</div>
+<p class="text-on-surface font-body-md">Reading project configuration.</p>
+</div>
+</div>
+<!-- Card 2: Completed -->
+<div class="bg-brand-panel border border-brand-border rounded-lg p-md shadow-sm flex gap-md items-start opacity-80 hover:opacity-100 transition-opacity">
+<div class="mt-1">
+<span class="material-symbols-outlined text-green-500" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex-1 space-y-xs">
+<div class="flex justify-between items-center">
+<span class="font-code-md text-code-md text-brand-indigo bg-brand-indigo/10 px-sm py-[2px] rounded">search_web · tailwind_grids</span>
+<span class="font-code-md text-[12px] text-on-surface-variant opacity-40">1.4s</span>
+</div>
+<p class="text-on-surface font-body-md">Searching for grid layout best practices.</p>
+</div>
+</div>
+<!-- Card 3: Active -->
+<div class="bg-brand-panel border border-brand-border step-active-border rounded-lg p-md shadow-xl flex gap-md items-start animate-pulse-subtle">
+<div class="mt-1">
+<span class="material-symbols-outlined text-brand-indigo animate-spin-slow">progress_activity</span>
+</div>
+<div class="flex-1 space-y-md">
+<div class="flex justify-between items-center">
+<span class="font-code-md text-code-md text-brand-indigo bg-brand-indigo/20 px-sm py-[2px] rounded">write_file · index.html</span>
+<span class="font-code-md text-[12px] text-brand-indigo animate-pulse">Running...</span>
+</div>
+<p class="text-on-surface font-body-md">Generating core application structure...</p>
+<!-- Code Snippet -->
+<div class="bg-[#0F172A] border border-brand-border rounded p-sm font-code-md text-code-md overflow-x-auto custom-scrollbar">
+<pre class="text-secondary-fixed-dim"><code><span class="text-on-tertiary-container">&lt;div</span> <span class="text-primary">class</span>=<span class="text-tertiary">"grid grid-cols-12 gap-4"</span><span class="text-on-tertiary-container">&gt;</span>
+  <span class="text-on-tertiary-container">&lt;aside</span> <span class="text-primary">class</span>=<span class="text-tertiary">"col-span-3 border-r border-slate-800"</span><span class="text-on-tertiary-container">&gt;</span>
+    <span class="text-on-surface-variant/40">// Sidebar Content Rendering...</span>
+  <span class="text-on-tertiary-container">&lt;/aside&gt;</span>
+<span class="text-on-tertiary-container">&lt;/div&gt;</span></code></pre>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- SideNavBar (Suppressed based on layout focus, but logic included for completeness) -->
+<!-- Hidden on desktop main view to focus on the 840px column per prompt -->
+<aside class="hidden xl:flex fixed left-0 top-0 h-full w-[280px] bg-surface-container dark:bg-surface-container border-r border-outline-variant flex-col p-md z-40">
+<div class="mb-xl px-sm">
+<h2 class="text-headline-lg-mobile font-headline-lg-mobile text-primary">Oxy Builder</h2>
+<p class="text-on-surface-variant text-body-sm">Local-first AI</p>
+</div>
+<nav class="flex-1 space-y-xs">
+<div class="flex items-center gap-md bg-secondary-container text-on-secondary-container rounded-lg px-md py-sm cursor-pointer">
+<span class="material-symbols-outlined" data-icon="construction">construction</span>
+<span class="font-body-sm text-body-sm">Builder</span>
+</div>
+<div class="flex items-center gap-md text-on-surface-variant hover:bg-surface-variant rounded-lg px-md py-sm cursor-pointer transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-body-sm text-body-sm">History</span>
+</div>
+<div class="flex items-center gap-md text-on-surface-variant hover:bg-surface-variant rounded-lg px-md py-sm cursor-pointer transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="folder_open">folder_open</span>
+<span class="font-body-sm text-body-sm">Library</span>
+</div>
+<div class="flex items-center gap-md text-on-surface-variant hover:bg-surface-variant rounded-lg px-md py-sm cursor-pointer transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-body-sm text-body-sm">Documentation</span>
+</div>
+</nav>
+<div class="mt-auto p-sm border-t border-brand-border pt-md">
+<div class="flex items-center gap-sm mb-md">
+<img alt="User profile" class="w-8 h-8 rounded-full border border-brand-indigo/30" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrlW1ECI-32-uFmCgOkziCI_8lZum14fssnhkzykU4oHlL8afGPb-ZfWSRunW4BaJfjt_Ygerx2ftBfXe7fEZ0La3AI-8jPGLs0X9uyW1Qtac3KhDguA0LWmgvIulBoywk3DFeMIthh_z_Y5LQMWSog-nfScOpHi3NwIsmxc8AaH8NS24wBwikVqG7HvhPNsULLaivCQ-zuhHAJaxyb4qwpJ3nrUtnahzgmOTPF0mM8L9BUg_HZJaw-85kT8gnWnKluqtEmA3RRGM"/>
+<div class="overflow-hidden">
+<p class="text-on-surface text-body-sm font-bold truncate">Developer</p>
+<p class="text-on-surface-variant text-[12px] truncate">Free Plan</p>
+</div>
+</div>
+<button class="w-full bg-brand-border hover:bg-brand-indigo/20 text-on-surface py-sm rounded-lg text-body-sm font-bold transition-colors">
+                Upgrade to Pro
+            </button>
+</div>
+</aside>
+<script>
+        // Simple micro-interaction for the textarea
+        const textarea = document.querySelector('textarea');
+        textarea.addEventListener('focus', () => {
+            textarea.parentElement.classList.add('shadow-[0_0_30px_rgba(99,102,241,0.1)]');
+        });
+        textarea.addEventListener('blur', () => {
+            textarea.parentElement.classList.remove('shadow-[0_0_30px_rgba(99,102,241,0.1)]');
+        });
+
+        // Simulating text typing in the code block
+        const codeElement = document.querySelector('code');
+        // Purely visual effect logic can be added here if needed
+    </script>
+</body></html>

@@ -480,7 +480,7 @@ export async function codelabHandler(req, res, next) {
       }
       return sendJson(res, 200, {
         ok: true,
-        engines: { ollama: ollamaUp, "node-llama": true },
+        engines: { ollama: ollamaUp, "llama-server": true },
         stitch: !!stitchApiKey(),
         sd: fs.existsSync(SD_CLI) && fs.existsSync(SD_MODEL),
         models,
@@ -524,10 +524,7 @@ export async function codelabHandler(req, res, next) {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
         let engine;
-        if (body.engine === "node-llama") {
-          const { NodeLlamaEngine } = await import("../engine/node-llama.ts");
-          engine = new NodeLlamaEngine({ modelRef: body.model });
-        } else if (body.engine === "openai") {
+        if (body.engine === "openai") {
           const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
           engine = new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
         } else if (body.engine === "llama-server") {

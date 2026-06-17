@@ -27,19 +27,23 @@ best done in a dedicated Claude Code session rooted in this folder.
    pluggable behind `ToolExecutor` (default `HttpToolExecutor` → `/codelab`).
    Verified by `agent/loop.test.ts` against a FakeEngine — run `npm test` (uses
    Node 24's built-in TS type-stripping; no install needed).
-2. **node-llama-cpp adapter** ✅ DONE — `engine/node-llama.ts` (low-level
-   `LlamaChat.generateResponse`, `functionCalls` surfaced un-executed, token
-   counts via the sequence `tokenMeter`, `<think>` split out, `ensureReady()`
-   downloads a default coder GGUF). Pure mappers in `engine/node-llama-map.ts`
-   (7 unit tests). Typechecked; live run needs `npm install` + first-run download.
-3. **Ollama adapter** ✅ DONE — `engine/ollama.ts` (streaming `/api/chat`, native
-   `tool_calls`, reasoning channel, exact token counts). Live-tested vs gemma4:e4b.
+2. **Local engine.** ✅ DONE — **managed llama-server** (`engine/llama-server.ts`):
+   auto-downloads a prebuilt `llama-server` (no compiler) + the GGUF via `-hf`
+   (default gemma4), auto-detects GPU (CUDA/Vulkan/CPU), drives it through
+   `openai-compat`. Replaced the original in-process node-llama-cpp adapter, which
+   was **dropped** — its bundled llama.cpp couldn't load gemma4, and it added ~750MB
+   to `node_modules` for no unique benefit once llama-server existed.
+3. **Adapters.** ✅ DONE — `engine/ollama.ts` (streaming `/api/chat`, native
+   `tool_calls`; live-tested vs gemma4:e4b) and `engine/openai-compat.ts` (any
+   OpenAI `/v1` server; the shared transport llama-server runs on). Text-emitted
+   tool calls recovered by `engine/tool-parse.ts`.
 4. **UI — design in Stitch, then wire React.** ✅ DONE — design generated in Stitch
    (`design/stitch-ui.html`), rebuilt in React (`src/`): prompt box, engine/model
    picker, context-pressure + compaction/burst cues, sandboxed preview, export.
    Builds run server-side via `/oxy/api/build` (NDJSON stream).
-5. **Model manager (light).** ✅ DONE — default auto-downloads (node-llama); UI
-   picker switches engine and takes any GGUF by HuggingFace ref / any Ollama model.
+5. **Model manager (light).** ✅ DONE — default auto-downloads (managed llama-server
+   via `-hf`); UI picker switches engine and takes any GGUF by HuggingFace ref /
+   any Ollama model / any OpenAI-compatible base URL.
 6. **Packaging.** ✅ `npm install` + `npm run dev` (UI) / `npm run oxy` (headless).
    Later: a Tauri desktop build for a true double-click app.
 

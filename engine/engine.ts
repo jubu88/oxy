@@ -5,15 +5,15 @@
 // and owns the message history itself. That is what keeps the orchestration layer —
 // Oxy's actual value — independent of whichever backend produces the tokens.
 //
-// IMPORTANT design note for the node-llama-cpp adapter:
-//   node-llama-cpp's high-level `LlamaChatSession.prompt(text, { functions })`
-//   AUTO-EXECUTES tool handlers in an internal loop — which would hide the seam
-//   where compaction/burst/strategy decisions happen. So the adapter must NOT use
-//   that. Use the lower-level `LlamaChat.generateResponse(...)`, which returns
-//   `functionCalls` WITHOUT running them; Oxy's loop executes the tools, appends
-//   results, decides on compaction/burst, and calls generate() again. History is
-//   held by Oxy (ChatMessage[]), not by a stateful session, so a compaction can
-//   replace it wholesale.
+// IMPORTANT design note: generate() must NOT execute tools or mutate history.
+//   It produces exactly ONE assistant turn (content + any tool calls) and returns.
+//   Oxy's loop executes the tools, appends results, decides on compaction/burst,
+//   and calls generate() again. History is held by Oxy (ChatMessage[]), not by a
+//   stateful session, so a compaction can replace it wholesale. Adapters that wrap
+//   a higher-level "auto-run tools" API must bypass it to preserve this seam.
+//
+// Implementations: engine/llama-server.ts (managed llama.cpp server — the default),
+// engine/ollama.ts, engine/openai-compat.ts (any OpenAI-compatible server).
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
@@ -70,7 +70,7 @@ export interface EngineModelInfo {
 }
 
 export interface Engine {
-  /** "node-llama-cpp" | "ollama" */
+  /** "llama-server" | "ollama" | "openai-compat" */
   readonly id: string;
 
   /**
