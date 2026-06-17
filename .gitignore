@@ -17,6 +17,8 @@ skillopt/journal.jsonl
 # A/B run artifacts + frozen pre-optimization skill copy
 skillopt/ab-report/
 skill/system.seed.md
+# transient candidate skill written by the manual (Claude-as-optimizer) promote
+skill/system.candidate.md
 # local tool-gating / terminal-mode settings
 oxy.settings.json
 Thumbs.db

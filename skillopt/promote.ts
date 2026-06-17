@@ -11,7 +11,7 @@
 // NOTE: the engine/eval setup intentionally mirrors optimize.ts; a shared runner is
 // a future refactor (kept separate now to avoid disturbing the offline optimizer).
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -30,6 +30,11 @@ const TARGET_ENGINE = process.env.OXY_ENGINE || "ollama";
 const TARGET_MODEL = process.env.OXY_MODEL || "gemma4:e4b";
 const OPT_ENGINE = process.env.OXY_OPT_ENGINE || "ollama";
 const OPT_MODEL = process.env.OXY_OPT_MODEL || "gpt-oss:120b-cloud";
+// "manual": Claude (in-session) or a human writes the candidate skill to
+// skill/system.candidate.md; the gemma4 benchmark gate still validates it. The best
+// possible optimizer ("you"), using no API key — proposals are never blindly trusted.
+const MANUAL = OPT_ENGINE === "manual";
+const CANDIDATE_PATH = process.env.OXY_SO_CANDIDATE || path.join(REPO, "skill", "system.candidate.md");
 const MAXITER = num(process.env.OXY_SO_MAXITER, 10);
 const VAL_REPEATS = num(process.env.OXY_SO_VAL_REPEATS, 2);
 const MARGIN = num(process.env.OXY_SO_MARGIN, 0.03);
@@ -76,11 +81,20 @@ async function makeEngine(name: string, model: string): Promise<Engine> {
 
 async function main() {
   const fresh = unconsumedCount();
-  if (fresh === 0) {
+  const digest = journalDigest();
+  if (!MANUAL && fresh === 0) {
     log("[promote] no new journal lessons — nothing to promote. (run some builds first)");
     process.exit(0);
   }
-  const digest = journalDigest();
+  // manual mode with no candidate yet: print the failure signal + where to write the
+  // candidate, and exit WITHOUT touching the model (so the proposer — Claude — can act).
+  if (MANUAL && !existsSync(CANDIDATE_PATH)) {
+    log(`\n=== manual optimizer brief ===`);
+    log(digest || "(no journal lessons yet — propose a proactive improvement)");
+    log(`\ncurrent skill: skill/system.md`);
+    log(`Write the improved skill to ${path.relative(REPO, CANDIDATE_PATH)}, then re-run this command to gate + deploy it.\n`);
+    process.exit(0);
+  }
   const tasksFile = JSON.parse(readFileSync(path.join(HERE, "tasks.json"), "utf8"));
   const valTasks: Task[] = tasksFile.val;
   const seed = existsSync(SKILL_PATH) ? readFileSync(SKILL_PATH, "utf8") : "";
@@ -91,10 +105,10 @@ async function main() {
 
   const stop = await ensureBackend();
   const target = await makeEngine(TARGET_ENGINE, TARGET_MODEL);
-  const optimizer = await makeEngine(OPT_ENGINE, OPT_MODEL);
+  const optimizer = MANUAL ? null : await makeEngine(OPT_ENGINE, OPT_MODEL);
   const executor = new HttpToolExecutor({ baseUrl: BASE });
   await target.ensureReady();
-  await optimizer.ensureReady();
+  if (optimizer) await optimizer.ensureReady();
 
   const buildOnce = async (skill: string, task: Task) => {
     let project = "";
@@ -131,16 +145,22 @@ async function main() {
   const base = await evalSkill(seed);
   log(`[promote] current skill val: ${base.score.toFixed(3)}`);
 
-  log(`[promote] asking optimizer for a journal-informed edit…`);
-  const res = await optimizer.generate(
-    [
-      { role: "system", content: 'You optimize the SYSTEM PROMPT (a reusable "skill") for a small coding agent that builds static web apps by calling tools. Output ONLY the full revised skill text — no preamble, no fences, no commentary.' },
-      { role: "user", content: `CURRENT SKILL:\n"""\n${seed}\n"""\n\nLESSONS FROM RECENT REAL BUILDS (the small model's actual failures in production):\n${digest}\n\nPropose ONE focused, GENERAL improvement to the skill that fixes the most impactful recurring failure above. Keep it compact (under ~450 words) and procedural. Output the FULL revised skill.` },
-    ],
-    [],
-    { temperature: 0.4, numCtx: 8192, numPredict: 1400 },
-  );
-  const candidate = (res.content || "").trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+  let candidate;
+  if (MANUAL) {
+    candidate = readFileSync(CANDIDATE_PATH, "utf8").trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+    log(`[promote] manual candidate from ${path.relative(REPO, CANDIDATE_PATH)} (${candidate.length} chars) — gating on ${TARGET_MODEL}`);
+  } else {
+    log(`[promote] asking optimizer for a journal-informed edit…`);
+    const res = await optimizer!.generate(
+      [
+        { role: "system", content: 'You optimize the SYSTEM PROMPT (a reusable "skill") for a small coding agent that builds static web apps by calling tools. Output ONLY the full revised skill text — no preamble, no fences, no commentary.' },
+        { role: "user", content: `CURRENT SKILL:\n"""\n${seed}\n"""\n\nLESSONS FROM RECENT REAL BUILDS (the small model's actual failures in production):\n${digest}\n\nPropose ONE focused, GENERAL improvement to the skill that fixes the most impactful recurring failure above. Keep it compact (under ~450 words) and procedural. Output the FULL revised skill.` },
+      ],
+      [],
+      { temperature: 0.4, numCtx: 8192, numPredict: 1400 },
+    );
+    candidate = (res.content || "").trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+  }
 
   let deployed = false;
   if (!candidate || candidate === seed.trim()) {
@@ -165,9 +185,11 @@ async function main() {
   // the lessons were considered (accepted or not) — clear them so the next promote
   // works on genuinely new feedback rather than re-proposing the same edit.
   markAllConsumed();
+  // consume the manual candidate so a re-run doesn't blindly re-apply it
+  if (MANUAL) rmSync(CANDIDATE_PATH, { force: true });
 
   await (target as { dispose?: () => Promise<void> }).dispose?.().catch(() => {});
-  await (optimizer as { dispose?: () => Promise<void> }).dispose?.().catch(() => {});
+  if (optimizer) await (optimizer as { dispose?: () => Promise<void> }).dispose?.().catch(() => {});
   stop();
   log(`\n=== promote done — ${deployed ? "skill improved" : "no change"} ===\n`);
   process.exit(0);
