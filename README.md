@@ -145,3 +145,14 @@ no compiler) and via **Ollama**. See [PLAN.md](PLAN.md) for the roadmap and
 [DESIGN.md](DESIGN.md) for where we're headed — generating **backends** with
 small-context models (spec-first, per-file), **mobile** (iOS/Android) targets, and
 the curated-vs-generic **MCP** decision.
+
+## Safety & license
+
+Oxy is **MIT-licensed** ([LICENSE](LICENSE)) — free to use, modify, and distribute.
+It is provided **"AS IS", with no warranty and no liability**: a local model writes
+files, fetches the web, and (if you enable powerful tools) can run commands. **You
+are solely responsible for what you run and for any consequences.** Treat the
+model's output as untrusted and run Oxy in an isolated environment (a VM, container,
+or other sandbox) — especially before enabling any command/terminal tool, which
+should only be used inside a disposable VM or a gated environment (e.g. Kubernetes).
+Powerful tools are **off by default** and toggled per-tool in Settings.
