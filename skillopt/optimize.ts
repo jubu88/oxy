@@ -102,12 +102,20 @@ async function main() {
   const evalSkill = async (skill: string, tasks: Task[]): Promise<EvalResult> => {
     const rollouts: Rollout[] = [];
     for (const task of tasks) {
-      const project = await createProject(`so-${task.id}`, BASE);
-      const steps: AgentStep[] = [];
-      try {
-        await runAgent({ task: task.prompt, project, maxIterations: MAXITER, temperature: 0.6, systemOverride: skill }, { engine: target, executor, onStep: (s) => steps.push(s) });
-      } catch (e: any) {
-        log(`      ${task.id}: build error — ${String(e?.message ?? e).slice(0, 80)}`);
+      // a fresh project per attempt; retry once on a transient transport error
+      // (e.g. "fetch failed") so a blip doesn't zero the task and poison the signal
+      let project = "";
+      let steps: AgentStep[] = [];
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        project = await createProject(`so-${task.id}`, BASE);
+        steps = [];
+        try {
+          await runAgent({ task: task.prompt, project, maxIterations: MAXITER, temperature: 0.6, systemOverride: skill }, { engine: target, executor, onStep: (s) => steps.push(s) });
+          break;
+        } catch (e: any) {
+          log(`      ${task.id}: build error (attempt ${attempt}/2) — ${String(e?.message ?? e).slice(0, 80)}`);
+          if (attempt < 2) await sleep(2000);
+        }
       }
       const finished = steps.at(-1)?.done ?? false;
       const { score, breakdown } = await scoreProject(path.join(REPO, "workspace", "projects", project), task, { finished });
