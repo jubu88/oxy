@@ -152,9 +152,14 @@ Rules:
 // appended to the system prompt only when the Stitch toggle is on (cloud opt-in)
 export const STITCH_RULE = `- For a COMPLEX or especially polished page, you MAY call design_with_stitch with a detailed description to have a professional cloud designer generate the whole page HTML for you (it writes index.html directly). It is slower and cloud-based, so use it when design quality matters; for simple pages, hand-writing with get_design_system is faster and fully local. If you use design_with_stitch, do not also write_file index.html — just review_design and refine it with edit_file.`;
 
-/** The system prompt for a run; appends the Stitch rule only when opted in. */
-export function buildSystem(useStitch?: boolean): string {
-  return useStitch ? `${SYSTEM}\n${STITCH_RULE}` : SYSTEM;
+/**
+ * The system prompt for a run. `override` is the optimizable "skill" (e.g. a
+ * SkillOpt-tuned skill/system.md); when absent we use the built-in SYSTEM seed.
+ * The Stitch rule is appended only when opted in.
+ */
+export function buildSystem(useStitch?: boolean, override?: string): string {
+  const base = override?.trim() ? override : SYSTEM;
+  return useStitch ? `${base}\n${STITCH_RULE}` : base;
 }
 
 /** The tool set for a run; the cloud Stitch tool is offered only when opted in. */

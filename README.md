@@ -99,7 +99,29 @@ server/     jailed backend (file tools, preview, SSRF-guarded web, SD, Stitch) �
 driver/     headless build driver (run-build.ts)
 src/        the React UI (designed in Stitch)
 design/     the Stitch-generated design reference
+skill/      system.md — the agent "skill" (optimizable prompt) builds read
+skillopt/   self-optimizing-skill loop (SkillOpt-style)
 ```
+
+## Self-optimizing skill (SkillOpt)
+
+The agent's `SYSTEM` prompt lives in `skill/system.md` — a small, inspectable
+"skill" that every build reads. `npm run skillopt` tunes it the way Microsoft's
+[SkillOpt](https://github.com/microsoft/SkillOpt) tunes agent skills: build a set of
+benchmark tasks with the current skill → score each (renders cleanly? required
+elements present? finished?) → a stronger *optimizer* model proposes one focused
+edit → **accept only if the held-out validation score strictly improves** → deploy
+to `skill/system.md`. The model weights never change; only the text does.
+
+```sh
+# optimize on a fast model, deploy the skill (it transfers to the local default)
+OXY_ENGINE=ollama OXY_OPT_MODEL=gpt-oss:120b-cloud npm run skillopt
+OXY_SO_LIMIT=1 OXY_SO_MAXITER=8 npm run skillopt   # quick smoke
+```
+
+The loop logic and scorer are unit-tested; a full run is slow (it's offline
+"training" — many builds), so optimize on a fast model and let the tuned skill
+transfer to the local model.
 
 ## Develop
 

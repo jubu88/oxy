@@ -543,6 +543,9 @@ export async function codelabHandler(req, res, next) {
         if (!project) project = await createProject(task.slice(0, 40), baseUrl);
         send({ type: "project", project, iterate });
         const executor = new HttpToolExecutor({ baseUrl });
+        // use the deployed (e.g. SkillOpt-tuned) skill if present
+        const skillPath = path.resolve(ROOT, "skill", "system.md");
+        const systemOverride = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
         let lastTok = 0;
         await runAgent(
           {
@@ -552,6 +555,7 @@ export async function codelabHandler(req, res, next) {
             temperature: Number(body.temperature) || 0.6,
             useStitch: !!body.useStitch,
             iterate,
+            systemOverride,
           },
           {
             engine,

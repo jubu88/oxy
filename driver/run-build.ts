@@ -10,7 +10,7 @@
 // Env: OXY_ENGINE (llama-server|ollama|openai), OXY_MODEL, OXY_TASK, OXY_MAX_ITER,
 //      OXY_TEMP, OXY_BASE (backend origin), OXY_USE_STITCH=1.
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -103,7 +103,10 @@ async function main() {
     console.log(`[oxy] project: ${project}${iterate ? " (iterating on existing)" : ""}\n`);
 
     const executor = new HttpToolExecutor({ baseUrl: BASE });
-    const config: AgentConfig = { task: TASK, project, maxIterations: MAX_ITER, temperature: TEMP, useStitch: USE_STITCH, iterate };
+    // use the deployed (e.g. SkillOpt-tuned) skill if present
+    const skillPath = path.join(REPO, "skill", "system.md");
+    const systemOverride = existsSync(skillPath) ? readFileSync(skillPath, "utf8") : undefined;
+    const config: AgentConfig = { task: TASK, project, maxIterations: MAX_ITER, temperature: TEMP, useStitch: USE_STITCH, iterate, systemOverride };
 
     const steps: AgentStep[] = [];
     let lastTokenLog = 0;

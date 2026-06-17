@@ -248,6 +248,13 @@ test("rambling without a tool call triggers a forceful nudge + a burst next turn
   assert.equal(engine.seenThink[1], true); // a reasoning burst is armed after rambling
 });
 
+test("systemOverride (the deployed/optimized skill) is used as the system prompt", async () => {
+  const engine = new FakeEngine([{ toolCalls: [tc("done", { summary: "x" })] }]);
+  await runAgent(baseConfig({ systemOverride: "OPTIMIZED SKILL TEXT" }), { engine, executor: new FakeExecutor(), onStep: () => {} });
+  assert.equal(engine.seenMessages[0][0].role, "system");
+  assert.equal(engine.seenMessages[0][0].content, "OPTIMIZED SKILL TEXT");
+});
+
 test("stops immediately when the signal is already aborted", async () => {
   const controller = new AbortController();
   controller.abort();

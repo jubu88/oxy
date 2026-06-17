@@ -18,5 +18,5 @@
     "noUnusedParameters": true,
     "types": ["node"]
   },
-  "include": ["agent", "engine", "driver", "src", "vite.config.ts"]
+  "include": ["agent", "engine", "driver", "src", "skillopt", "vite.config.ts"]
 }

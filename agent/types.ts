@@ -61,6 +61,11 @@ export interface AgentConfig {
    * to make (read before editing, prefer edit_file, keep what works).
    */
   iterate?: boolean;
+  /**
+   * Override the system prompt — the optimizable "skill" (SkillOpt). When unset,
+   * the loop uses the built-in SYSTEM seed (or a deployed skill/system.md).
+   */
+  systemOverride?: string;
 }
 
 /** A file on disk in a project, as the backend reports it. */

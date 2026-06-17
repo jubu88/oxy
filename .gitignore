@@ -11,5 +11,6 @@ workspace/projects/*
 # logs / run artifacts
 *.log
 last-run.json
+skillopt/last-opt.json
 Thumbs.db
 .DS_Store

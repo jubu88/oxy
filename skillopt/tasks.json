@@ -1,0 +1,47 @@
+{
+  "_comment": "SkillOpt build benchmark. Each task is built with the candidate skill, then scored (renders cleanly? required elements/text present? finished?). train = optimize on; val = the held-out gate.",
+  "train": [
+    {
+      "id": "hello",
+      "prompt": "Build a centered 'Hello, World' landing page with a gradient background, a big heading, and a single call-to-action button. Single index.html. Then call done.",
+      "checks": { "selectors": ["h1", "button, a"], "textIncludes": ["hello"] }
+    },
+    {
+      "id": "counter",
+      "prompt": "Build a counter app: a large number starting at 0, with a + button and a - button that increase and decrease it. Make it work with vanilla JavaScript. Single index.html. Then call done.",
+      "checks": { "selectors": ["button"], "textIncludes": ["0"] }
+    },
+    {
+      "id": "todo",
+      "prompt": "Build a simple to-do list: a text input, an 'Add' button, and a list below. Typing and pressing Add appends the item to the list (vanilla JavaScript). Single index.html. Then call done.",
+      "checks": { "selectors": ["input", "button", "ul, ol"], "textIncludes": ["add"] }
+    },
+    {
+      "id": "pomodoro",
+      "prompt": "Build a Pomodoro focus timer showing 25:00, with Start and Reset buttons that run a working countdown in vanilla JavaScript. Single index.html. Then call done.",
+      "checks": { "selectors": ["button"], "textIncludes": ["25:00", "start"] }
+    },
+    {
+      "id": "pricing",
+      "prompt": "Build a 3-tier pricing section: three cards (Basic, Pro, Team) each with a price, a few features, and a 'Choose' button. Single index.html. Then call done.",
+      "checks": { "selectors": ["button, a"], "textIncludes": ["pro", "choose"] }
+    }
+  ],
+  "val": [
+    {
+      "id": "calculator",
+      "prompt": "Build a simple calculator: a display and number/operator buttons that compute results in vanilla JavaScript. Single index.html. Then call done.",
+      "checks": { "selectors": ["button"], "textIncludes": ["7"] }
+    },
+    {
+      "id": "clock",
+      "prompt": "Build a live digital clock, centered, that updates every second with vanilla JavaScript and shows the current time. Single index.html. Then call done.",
+      "checks": { "selectors": ["script"], "textIncludes": [":"] }
+    },
+    {
+      "id": "profile",
+      "prompt": "Build a profile card: a circular avatar, a name, a short bio line, and a 'Follow' button. Single index.html. Then call done.",
+      "checks": { "selectors": ["button"], "textIncludes": ["follow"] }
+    }
+  ]
+}
