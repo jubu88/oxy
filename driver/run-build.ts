@@ -95,8 +95,9 @@ async function main() {
 
   const stopBackend = await ensureBackend();
   let exitCode = 0;
+  let engine: Engine | null = null;
   try {
-    const engine = await makeEngine();
+    engine = await makeEngine();
     console.log(`[oxy] preparing engine …`);
     await engine.ensureReady();
 
@@ -159,6 +160,11 @@ async function main() {
     console.error(`\n[oxy] build failed: ${String(e?.stack ?? e?.message ?? e)}`);
     exitCode = 1;
   } finally {
+    try {
+      await (engine as { dispose?: () => Promise<void> } | null)?.dispose?.();
+    } catch {
+      /* best-effort */
+    }
     stopBackend();
   }
   process.exit(exitCode);
