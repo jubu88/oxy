@@ -3,10 +3,33 @@
 @tailwind utilities;
 
 /* Custom bits from the Stitch design (design/stitch-ui.html) that aren't utilities. */
-body {
+/* dark fallback on the root only; body MUST stay transparent so the fixed nebula
+   canvas (z-index:-2) shows through in the margins behind the solid panels */
+html {
   background-color: #0f172a; /* brand-slate */
+}
+body {
+  background: transparent;
   color: #e4e1ed; /* on-surface */
   -webkit-font-smoothing: antialiased;
+}
+.bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -2;
+  display: block;
+}
+/* gentle vignette so the nebula stays calm toward the edges (content is on solid
+   panels, so this only affects empty margins) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 22%, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.35) 68%, rgba(15, 23, 42, 0.6) 100%);
 }
 .material-symbols-outlined {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;

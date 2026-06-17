@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentStep } from "../agent/types.ts";
+import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
 import { exportUrl, getProjects, getStatus, previewUrl, runBuild, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
@@ -168,6 +169,7 @@ export function App() {
 
   return (
     <>
+      <Background />
       <header className="bg-background border-b border-outline-variant fixed top-0 w-full z-50">
         <div className="flex justify-between items-center max-w-[840px] mx-auto px-lg py-md w-full">
           <div className="flex items-baseline gap-sm">
@@ -235,7 +237,7 @@ export function App() {
         {/* Status bar */}
         <section className="flex flex-col md:flex-row justify-between items-center gap-md mb-xl px-xs">
           <div className="flex items-center gap-sm flex-wrap">
-            <div className="border border-brand-border bg-brand-panel/50 px-md py-xs rounded-full flex items-center gap-xs">
+            <div className="border border-brand-border bg-brand-panel/80 px-md py-xs rounded-full flex items-center gap-xs">
               <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
               <select className="oxy-field text-primary font-code-md text-code-md" value={engine} onChange={(e) => changeEngine(e.target.value)}>
                 {status?.engines.ollama && <option value="ollama">ollama</option>}
@@ -334,7 +336,7 @@ export function App() {
         <section>
           <h3 className="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest mb-sm ml-xs">Preview</h3>
           <div className="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-lg">
-            <div className="flex items-center justify-between gap-md px-md py-sm border-b border-brand-border bg-background/40">
+            <div className="flex items-center justify-between gap-md px-md py-sm border-b border-brand-border bg-background/70">
               <div className="flex gap-xs w-1/4">
                 <span className="w-2.5 h-2.5 rounded-full bg-error/60" />
                 <span className="w-2.5 h-2.5 rounded-full bg-tertiary/60" />
