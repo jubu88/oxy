@@ -77,6 +77,50 @@ function pickDefaultModel(models: string[]): string {
 
 const projectLabel = (id: string) => id.replace(/-\d{8,}$/, "").replace(/-/g, " ").slice(0, 40) || id;
 
+// Read a file's bytes as base64 (no data: prefix).
+function fileToBase64(f: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(f);
+  });
+}
+
+// Downscale large images before sending. gemma4 tiles big images into many vision
+// tokens ("pan-and-scan"), so a full-size screenshot can take minutes to encode on
+// an iGPU before the first output token. Capping the longest edge slashes that with
+// negligible quality loss for "look at this and build it". Small images and any
+// decode failure fall through to the original bytes untouched.
+async function imageToAttachmentData(f: File, maxEdge = 1024): Promise<{ data: string; mime: string }> {
+  try {
+    const bmp = await createImageBitmap(f);
+    const big = Math.max(bmp.width, bmp.height);
+    if (big <= maxEdge) {
+      bmp.close?.();
+      return { data: await fileToBase64(f), mime: f.type };
+    }
+    const scale = maxEdge / big;
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bmp.close?.();
+      return { data: await fileToBase64(f), mime: f.type };
+    }
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    // PNG keeps UI/text screenshots crisp (JPEG ringing hurts "rebuild this UI").
+    const data = canvas.toDataURL("image/png").split(",")[1] ?? "";
+    return { data, mime: "image/png" };
+  } catch {
+    return { data: await fileToBase64(f), mime: f.type };
+  }
+}
+
 export function App() {
   const [status, setStatus] = useState<OxyStatus | null>(null);
   const [engine, setEngine] = useState("ollama");
@@ -140,6 +184,8 @@ export function App() {
   // live "generating…" indicator: elapsed since the current turn began + streamed tokens/rate
   const genElapsed = building ? Date.now() - genStartRef.current : 0;
   const liveLabel = building ? `${fmtElapsed(genElapsed)}${liveTokens > 0 ? ` · ${liveTokens} tok · ${Math.round(liveTokens / Math.max(1, genElapsed / 1000))}/s` : ""}` : "";
+  // once tokens stream, the model is past loading/prefill — say so, don't linger on "reading images…"
+  const displayStatus = building && liveTokens > 0 ? "generating…" : statusMsg;
 
   function changeEngine(next: string) {
     setEngine(next);
@@ -272,13 +318,11 @@ export function App() {
         setError(`${f.name} is too large (max 12 MB)`);
         continue;
       }
-      const data = await new Promise<string>((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result).split(",")[1] ?? ""); // strip the data:…;base64, prefix
-        r.onerror = () => reject(r.error);
-        r.readAsDataURL(f);
-      });
-      next.push({ kind, mime: f.type, data, name: f.name || `pasted.${f.type.split("/")[1] || "png"}` });
+      // images get downscaled (huge screenshots = slow vision prefill on an iGPU);
+      // audio passes through as raw base64.
+      const { data, mime } =
+        kind === "image" ? await imageToAttachmentData(f) : { data: await fileToBase64(f), mime: f.type };
+      next.push({ kind, mime, data, name: f.name || `pasted.${mime.split("/")[1] || "png"}` });
     }
     if (next.length) setAttachments((prev) => [...prev, ...next].slice(0, 6));
     if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
@@ -403,12 +447,12 @@ export function App() {
         {mode === "build" && (steps.length > 0 || building) && (
           <section>
             <p className="section-title">Build progress</p>
-            {statusMsg && steps.length === 0 && (
+            {displayStatus && steps.length === 0 && (
               <div className="timeline empty">
                 <div className="card">
                   <div className="left">
                     <span className="material-symbols-outlined">hourglass_top</span>
-                    <code>{statusMsg}</code>
+                    <code>{displayStatus}</code>
                   </div>
                   {liveLabel && <span className="live">{liveLabel}</span>}
                 </div>
@@ -446,7 +490,7 @@ export function App() {
           <section>
             <p className="section-title">Answer</p>
             <div className="answer-card">
-              {answer ? <div className="answer-text">{answer}</div> : <div className="answer-text muted">{statusMsg || "…"}</div>}
+              {answer ? <div className="answer-text">{answer}</div> : <div className="answer-text muted">{displayStatus || "…"}</div>}
               {building && liveLabel && <div className="answer-live">{liveLabel}</div>}
             </div>
           </section>

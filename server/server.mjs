@@ -596,7 +596,7 @@ export async function codelabHandler(req, res, next) {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
         const engine = await engineFromBody(body);
-        send({ type: "status", message: "preparing engine…" });
+        send({ type: "status", message: "loading model…" });
         await engine.ensureReady();
         const baseUrl = `http://${req.headers.host}`;
         // continue an existing project (iterate) when an id is supplied, else create one
@@ -612,6 +612,10 @@ export async function codelabHandler(req, res, next) {
         const attachments = Array.isArray(body.attachments)
           ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
           : undefined;
+        // distinct phase so a long image-encode (vision prefill) doesn't look hung:
+        // "reading your N image(s)…" stays up through prefill until the first token lands.
+        const imgCount = attachments ? attachments.filter((a) => a.kind === "image").length : 0;
+        send({ type: "status", message: imgCount ? `reading your ${imgCount} image${imgCount > 1 ? "s" : ""}…` : "generating…" });
         let lastTok = 0;
         const toolLog = []; // for the continuous-improvement supervisor review
         let finished = false;
@@ -692,11 +696,14 @@ export async function codelabHandler(req, res, next) {
       req.on("close", () => ac.abort());
       try {
         const engine = await engineFromBody(body);
-        send({ type: "status", message: "thinking…" });
+        send({ type: "status", message: "loading model…" });
         await engine.ensureReady();
         const attachments = Array.isArray(body.attachments)
           ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
           : undefined;
+        // keep a clear phase up through the (slow) image-encode prefill
+        const imgCount = attachments ? attachments.filter((a) => a.kind === "image").length : 0;
+        send({ type: "status", message: imgCount ? `reading your ${imgCount} image${imgCount > 1 ? "s" : ""}…` : "thinking…" });
         let answer = "";
         let lastLen = 0;
         const result = await engine.generate(
