@@ -80,11 +80,21 @@ export class OpenAICompatEngine implements Engine {
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
     if (opts.numPredict) body.max_tokens = opts.numPredict;
 
-    // per-generate timeout so a dead/suspended server (e.g. the laptop slept) makes
-    // the build fail-fast instead of hanging forever on a stuck stream read.
-    const timeoutMs = Number(process.env.OXY_GEN_TIMEOUT_MS) || 600_000; // slow iGPU can need minutes for a big file
+    // IDLE (inactivity) timeout — abort only if the stream goes QUIET, never on total
+    // wall-clock. A slow-but-streaming generate (the iGPU writing a big file at a few
+    // tok/s) keeps resetting the timer via kick() and runs to completion; a dead /
+    // suspended / slept server emits nothing and trips it after idleMs. A *total* 600s
+    // timeout used to kill legit slow generates here, after which llama-server.ts
+    // rebooted and retried the turn from scratch — looping forever on any non-trivial
+    // build. That regression is what this replaces.
+    const idleMs = Number(process.env.OXY_GEN_IDLE_TIMEOUT_MS) || 120_000;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error("generate timeout")), timeoutMs);
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const kick = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => ctrl.abort(new Error(`generate stalled (no tokens for ${Math.round(idleMs / 1000)}s)`)), idleMs);
+    };
+    kick();
     const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
     let res: Response;
     try {
@@ -95,11 +105,12 @@ export class OpenAICompatEngine implements Engine {
         signal,
       });
     } catch (e) {
-      clearTimeout(timer);
+      clearTimeout(idleTimer);
       throw e;
     }
     if (!res.ok) throw new Error(`OpenAI-compatible error (HTTP ${res.status}): ${(await res.text()).slice(0, 300)}`);
     if (!res.body) throw new Error("no response body");
+    kick(); // headers arrived — the server is alive; (re)arm the idle watchdog
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -144,6 +155,7 @@ export class OpenAICompatEngine implements Engine {
         if (opts.signal?.aborted) break;
         const { done, value } = await reader.read();
         if (done) break;
+        kick(); // activity — tokens are flowing, so the server isn't stalled
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
@@ -155,7 +167,7 @@ export class OpenAICompatEngine implements Engine {
     } catch (e: any) {
       if (!opts.signal?.aborted) throw e;
     } finally {
-      clearTimeout(timer);
+      clearTimeout(idleTimer);
     }
 
     let toolCalls: ToolCall[] = finalizeToolCalls(toolFrags);
