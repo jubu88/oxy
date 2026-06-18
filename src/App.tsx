@@ -52,7 +52,6 @@ function tagsFor(s: AgentStep): Array<{ cls: string; label: string }> {
 function processorLabel(engine: string, status: OxyStatus | null): string {
   if (!status) return "";
   if (engine === "openai") return "remote";
-  if (engine === "litert-lm") return "LiteRT"; // manages its own CPU/GPU backend
   if (engine === "ollama") return status.ollamaUsesGpu ? (status.gpu ?? "gpu").toUpperCase() : "CPU";
   return (status.gpu ?? "cpu").toUpperCase();
 }
@@ -358,7 +357,6 @@ export function App() {
             <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
               {status?.engines.ollama && <option value="ollama">ollama</option>}
               <option value="llama-server">llama-server</option>
-              {status?.engines["litert-lm"] && <option value="litert-lm">litert-lm · vision</option>}
               <option value="openai">openai</option>
             </select>
             {engine === "ollama" ? (

@@ -462,10 +462,6 @@ async function engineFromBody(body) {
     const { LlamaServerEngine } = await import("../engine/llama-server.ts");
     return new LlamaServerEngine({ modelRef: body.model || undefined });
   }
-  if (body.engine === "litert-lm") {
-    const { LiteRtLmEngine } = await import("../engine/litert-lm.ts");
-    return new LiteRtLmEngine({ model: body.model || undefined });
-  }
   const { OllamaEngine } = await import("../engine/ollama.ts");
   return new OllamaEngine({ model: body.model });
 }
@@ -526,7 +522,7 @@ export async function codelabHandler(req, res, next) {
       const settings = readSettings();
       return sendJson(res, 200, {
         ok: true,
-        engines: { ollama: ollamaUp, "llama-server": true, "litert-lm": true },
+        engines: { ollama: ollamaUp, "llama-server": true },
         gpu: gpu.backend,
         ollamaUsesGpu: gpu.ollamaUsesGpu,
         recommended: rec.engine,

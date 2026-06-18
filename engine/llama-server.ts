@@ -229,8 +229,26 @@ export class LlamaServerEngine implements Engine {
     throw new Error("llama-server did not become healthy in time");
   }
 
+  private async healthy(): Promise<boolean> {
+    try {
+      return (await fetch(`${this.base()}/health`, { signal: AbortSignal.timeout(2000) })).ok;
+    } catch {
+      return false;
+    }
+  }
+
   async ensureReady(): Promise<void> {
     if (this.ready) return;
+    // reuse a llama-server already serving on our port instead of spawning a
+    // duplicate — a second model load blows up RAM and fights for the port (the
+    // cause of a stuck "preparing engine…"). One model per port; restart to swap.
+    if (await this.healthy()) {
+      console.log(`[oxy] reusing llama-server already on :${this.port}`);
+      this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
+      await this.inner.ensureReady();
+      this.ready = true;
+      return;
+    }
     if (this.variant === "auto") this.variant = await detectVariant();
     this.gpuLayers = this.nglOverride ?? (this.variant === "cpu" ? 0 : 999);
     try {

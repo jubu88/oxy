@@ -86,12 +86,6 @@ loop is backend-agnostic:
 - **`engine/openai-compat.ts`** — the shared transport under llama-server/Ollama; also
   works standalone against **any OpenAI-compatible server** (LM Studio, Jan, vLLM, a
   remote endpoint) — point it at a base URL in the model picker.
-- **`engine/litert-lm.ts`** — Google AI Edge's **LiteRT-LM** runtime, which decodes
-  **gemma4 vision + audio** (llama.cpp doesn't yet). Oxy manages a `litert-lm serve`
-  (OpenAI-compatible) and drives it through the openai-compat adapter, so image
-  attachments work. Needs the CLI (`pip install litert-lm`; auto-located, or set
-  `OXY_LITERTLM_BIN`); the gemma4 `.litertlm` is auto-imported on first use. Pick
-  **litert-lm** in the engine picker for multimodal builds.
 
 Oxy prefers Ollama only when it would offload to your GPU (CUDA/Metal); on a
 Vulkan-only machine (e.g. an Intel iGPU) Ollama runs on CPU, so Oxy prefers the
