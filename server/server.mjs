@@ -508,7 +508,7 @@ export async function codelabHandler(req, res, next) {
       const settings = readSettings();
       return sendJson(res, 200, {
         ok: true,
-        engines: { ollama: ollamaUp, "llama-server": true },
+        engines: { ollama: ollamaUp, "llama-server": true, "litert-lm": true },
         gpu: gpu.backend,
         ollamaUsesGpu: gpu.ollamaUsesGpu,
         recommended: rec.engine,
@@ -588,6 +588,10 @@ export async function codelabHandler(req, res, next) {
         } else if (body.engine === "llama-server") {
           const { LlamaServerEngine } = await import("../engine/llama-server.ts");
           engine = new LlamaServerEngine({ modelRef: body.model || undefined });
+        } else if (body.engine === "litert-lm") {
+          // Google AI Edge runtime — decodes gemma4 vision/audio (llama.cpp doesn't yet)
+          const { LiteRtLmEngine } = await import("../engine/litert-lm.ts");
+          engine = new LiteRtLmEngine({ model: body.model || undefined });
         } else {
           const { OllamaEngine } = await import("../engine/ollama.ts");
           engine = new OllamaEngine({ model: body.model });
