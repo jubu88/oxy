@@ -119,7 +119,10 @@ function assetNameFor(tag: string, variant: string): string {
 
 async function ensureBinary(variant: string): Promise<string> {
   const exe = process.platform === "win32" ? "llama-server.exe" : "llama-server";
-  if (fs.existsSync(CACHE_ROOT)) {
+  // use any cached build for speed — UNLESS OXY_LLAMA_UPGRADE=1, which forces a
+  // check for the latest llama.cpp release (otherwise an old cached build is kept
+  // forever even as newer releases ship).
+  if (!process.env.OXY_LLAMA_UPGRADE && fs.existsSync(CACHE_ROOT)) {
     const cached = findFile(CACHE_ROOT, exe);
     if (cached) return cached;
   }
@@ -127,6 +130,12 @@ async function ensureBinary(variant: string): Promise<string> {
   const rel: any = await (await fetch(RELEASES_JSON, { headers: { "User-Agent": "oxy", Accept: "application/vnd.github+json" } })).json();
   const tag = rel.tag_name as string;
   if (!tag) throw new Error(`could not read latest llama.cpp release (see ${RELEASES_API})`);
+  // already have the latest tag cached? use it without re-downloading.
+  const tagDir = path.join(CACHE_ROOT, tag);
+  if (fs.existsSync(tagDir)) {
+    const have = findFile(tagDir, exe);
+    if (have) return have;
+  }
   const wanted = assetNameFor(tag, variant);
   const asset = (rel.assets ?? []).find((a: any) => a.name === wanted);
   if (!asset) {
