@@ -287,7 +287,21 @@ export class LlamaServerEngine implements Engine {
 
   async generate(messages: ChatMessage[], tools: ToolDef[], opts: GenerateOptions): Promise<GenerateResult> {
     await this.ensureReady();
-    return this.inner!.generate(messages, tools, opts);
+    try {
+      return await this.inner!.generate(messages, tools, opts);
+    } catch (e: any) {
+      if (opts.signal?.aborted) throw e; // genuine user cancel — don't reboot
+      // the managed server may have died or hung (iGPU/Vulkan can crash under
+      // sustained load). reboot once and retry so one death doesn't poison the run.
+      console.warn(`[oxy] llama-server generate failed (${String(e?.message ?? e).slice(0, 80)}) — rebooting and retrying once`);
+      try {
+        await this.dispose();
+      } catch {
+        /* ignore */
+      }
+      await this.ensureReady();
+      return await this.inner!.generate(messages, tools, opts);
+    }
   }
 
   async dispose(): Promise<void> {

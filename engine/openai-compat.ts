@@ -82,7 +82,7 @@ export class OpenAICompatEngine implements Engine {
 
     // per-generate timeout so a dead/suspended server (e.g. the laptop slept) makes
     // the build fail-fast instead of hanging forever on a stuck stream read.
-    const timeoutMs = Number(process.env.OXY_GEN_TIMEOUT_MS) || 240_000;
+    const timeoutMs = Number(process.env.OXY_GEN_TIMEOUT_MS) || 600_000; // slow iGPU can need minutes for a big file
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(new Error("generate timeout")), timeoutMs);
     const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
