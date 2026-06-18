@@ -21,7 +21,7 @@ function toOllamaMessage(m: ChatMessage): any {
   const out: any = { role: m.role, content: m.content };
   // multimodal input (gemma4 = vision + audio). Ollama takes base64 images on the
   // message `images` array. Audio uses `audio` — verified live against the running
-  // gemma3n model before relying on it (adjust the field here if Ollama differs).
+  // gemma4 model before relying on it (adjust the field here if Ollama differs).
   if (m.attachments?.length) {
     const imgs = m.attachments.filter((a) => a.kind === "image").map((a) => a.data);
     const auds = m.attachments.filter((a) => a.kind === "audio").map((a) => a.data);
