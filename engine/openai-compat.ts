@@ -80,12 +80,24 @@ export class OpenAICompatEngine implements Engine {
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
     if (opts.numPredict) body.max_tokens = opts.numPredict;
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    });
+    // per-generate timeout so a dead/suspended server (e.g. the laptop slept) makes
+    // the build fail-fast instead of hanging forever on a stuck stream read.
+    const timeoutMs = Number(process.env.OXY_GEN_TIMEOUT_MS) || 240_000;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new Error("generate timeout")), timeoutMs);
+    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
     if (!res.ok) throw new Error(`OpenAI-compatible error (HTTP ${res.status}): ${(await res.text()).slice(0, 300)}`);
     if (!res.body) throw new Error("no response body");
 
@@ -142,6 +154,8 @@ export class OpenAICompatEngine implements Engine {
       }
     } catch (e: any) {
       if (!opts.signal?.aborted) throw e;
+    } finally {
+      clearTimeout(timer);
     }
 
     let toolCalls: ToolCall[] = finalizeToolCalls(toolFrags);
