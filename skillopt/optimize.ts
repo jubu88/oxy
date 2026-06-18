@@ -86,7 +86,8 @@ function toolSummary(steps: AgentStep[]): string {
 }
 
 async function main() {
-  const tasksFile = JSON.parse(readFileSync(path.join(HERE, "tasks.json"), "utf8"));
+  const tasksPath = process.env.OXY_SO_TASKS ? path.resolve(REPO, process.env.OXY_SO_TASKS) : path.join(HERE, "tasks.json");
+  const tasksFile = JSON.parse(readFileSync(tasksPath, "utf8"));
   let trainTasks: Task[] = tasksFile.train;
   let valTasks: Task[] = tasksFile.val;
   const limit = num(process.env.OXY_SO_LIMIT, 0); // cap tasks for a quick smoke run

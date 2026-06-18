@@ -1,0 +1,78 @@
+{
+  "_comment": "HARDER SkillOpt benchmark — multi-feature / multi-step / computed-state apps that the easy set (tasks.json, which gemma4 now aces at 1.000) doesn't cover. Interaction checks lean on computed values + selector-independent 'changed' so they stay robust. Use via OXY_SO_TASKS=skillopt/tasks-hard.json.",
+  "train": [
+    {
+      "id": "converter",
+      "prompt": "Build a currency converter in a single index.html with vanilla JS: a dollars number input and a 'Convert' button; on click it shows the euro amount (dollars times 0.9). Then call done.",
+      "checks": {
+        "selectors": ["input", "button"],
+        "textIncludes": ["convert"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "100" } }, { "clickText": "Convert" }], "expect": [{ "contains": "90", "label": "100 dollars converts to 90 euros" }] }]
+      }
+    },
+    {
+      "id": "char-limit",
+      "prompt": "Build a textarea with a live counter below it showing 'used / 100' that updates as you type. Vanilla JS, single index.html. Then call done.",
+      "checks": {
+        "selectors": ["textarea, input"],
+        "textIncludes": ["100"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "textarea, input", "value": "hello" } }], "expect": [{ "contains": "5", "label": "typing 5 chars shows 5 used" }] }]
+      }
+    },
+    {
+      "id": "countdown",
+      "prompt": "Build a countdown timer: a number input for seconds and a 'Start' button that counts down to 0, updating every second. Vanilla JS, single index.html. Then call done.",
+      "checks": {
+        "selectors": ["input", "button"],
+        "textIncludes": ["start"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "9" } }, { "clickText": "Start" }, { "waitMs": 1200 }], "expect": [{ "changed": true, "label": "the countdown ticks down after Start" }] }]
+      }
+    }
+  ],
+  "val": [
+    {
+      "id": "tip-calc",
+      "prompt": "Build a tip calculator in a single index.html with vanilla JS: a bill-amount input, three buttons labeled '10%', '15%', '20%', and a display showing the tip amount AND the total (bill + tip). Then call done.",
+      "checks": {
+        "selectors": ["input", "button"],
+        "textIncludes": ["tip", "total"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "100" } }, { "clickText": "20%" }], "expect": [{ "contains": "120", "label": "bill 100 + 20% tip = total 120" }] }]
+      }
+    },
+    {
+      "id": "chained-calc",
+      "prompt": "Build a calculator in a single index.html that supports CHAINED operations (e.g. 9 + 1 = then + 5 = keeps computing on the running result) with digit buttons, +, =, and a Clear button. Vanilla JS. Then call done.",
+      "checks": {
+        "selectors": ["button"],
+        "interactions": [{ "steps": [{ "clickText": "9" }, { "clickText": "+" }, { "clickText": "1" }, { "clickText": "=" }, { "clickText": "+" }, { "clickText": "5" }, { "clickText": "=" }], "expect": [{ "contains": "15", "label": "9+1=10 then +5= shows 15 (chained)" }] }]
+      }
+    },
+    {
+      "id": "wizard",
+      "prompt": "Build a 2-step signup form in a single index.html with vanilla JS. Step 1: an email field and a 'Next' button. Clicking 'Next' advances to step 2 (a password field) ONLY if the email is non-empty; if empty, stay on step 1 and show an error message. Then call done.",
+      "checks": {
+        "selectors": ["input", "button"],
+        "textIncludes": ["email", "next"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "a@b.com" } }, { "clickText": "Next" }], "expect": [{ "contains": "password", "label": "valid email + Next reveals the password step" }] }]
+      }
+    },
+    {
+      "id": "filter-list",
+      "prompt": "Build a searchable list in a single index.html with vanilla JS: a search box above a list of five fruits (Apple, Banana, Cherry, Grape, Orange). Typing filters the list to only the items that match, live. Then call done.",
+      "checks": {
+        "selectors": ["input", "ul, ol"],
+        "textIncludes": ["apple", "banana"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "ap" } }], "expect": [{ "changed": true, "label": "typing 'ap' filters the visible list" }] }]
+      }
+    },
+    {
+      "id": "stopwatch",
+      "prompt": "Build a stopwatch in a single index.html with vanilla JS: a time display starting at 00:00, and Start, Stop, and Reset buttons. Start makes the time advance. Then call done.",
+      "checks": {
+        "selectors": ["button"],
+        "textIncludes": ["00:00", "start", "reset"],
+        "interactions": [{ "steps": [{ "clickText": "Start" }, { "waitMs": 1300 }], "expect": [{ "changed": true, "label": "the stopwatch advances after Start" }] }]
+      }
+    }
+  ]
+}

@@ -95,7 +95,8 @@ async function main() {
     log(`Write the improved skill to ${path.relative(REPO, CANDIDATE_PATH)}, then re-run this command to gate + deploy it.\n`);
     process.exit(0);
   }
-  const tasksFile = JSON.parse(readFileSync(path.join(HERE, "tasks.json"), "utf8"));
+  const tasksPath = process.env.OXY_SO_TASKS ? path.resolve(REPO, process.env.OXY_SO_TASKS) : path.join(HERE, "tasks.json");
+  const tasksFile = JSON.parse(readFileSync(tasksPath, "utf8"));
   const valTasks: Task[] = tasksFile.val;
   const seed = existsSync(SKILL_PATH) ? readFileSync(SKILL_PATH, "utf8") : "";
 
