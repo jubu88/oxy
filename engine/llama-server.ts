@@ -237,17 +237,61 @@ export class LlamaServerEngine implements Engine {
     }
   }
 
+  /** The model id the running server should report for our modelRef. */
+  private expectedModelId(): string {
+    if (this.modelRef.startsWith("hf:")) return this.modelRef.slice(3);
+    if (/^https?:\/\//i.test(this.modelRef)) return this.modelRef;
+    return path.basename(this.modelRef);
+  }
+
+  /** Is the server already on our port serving the model we actually want? llama-server
+   *  loads ONE model per process, so a stale server running a different model would
+   *  silently answer with the wrong one (pick a new HF model, still get gemma4). */
+  private async servesModel(): Promise<boolean> {
+    try {
+      const r = await fetch(`${this.base()}/v1/models`, { signal: AbortSignal.timeout(3000) });
+      if (!r.ok) return false;
+      const j: any = await r.json();
+      const ids: string[] = (j.data ?? j.models ?? []).map((m: any) => m.id ?? m.name).filter(Boolean);
+      const want = this.expectedModelId();
+      return ids.some((id) => id === want || id.endsWith(want) || want.endsWith(id) || id.includes(want));
+    } catch {
+      return false;
+    }
+  }
+
+  /** Stop ANY llama-server on this machine — including an orphan from a previous dev
+   *  run that THIS instance never spawned (so dispose(), which only kills this.child,
+   *  can't reach it). Used to swap models or clear a wedged/zombie server. */
+  private async killExisting(): Promise<void> {
+    try {
+      if (process.platform === "win32") await execFileP("taskkill", ["/F", "/IM", "llama-server.exe"]);
+      else await execFileP("pkill", ["-f", "llama-server"]);
+    } catch {
+      /* none running / already gone */
+    }
+    this.child = null;
+    this.inner = null;
+    await sleep(600); // let the OS free the port before we rebind
+  }
+
   async ensureReady(): Promise<void> {
     if (this.ready) return;
     // reuse a llama-server already serving on our port instead of spawning a
-    // duplicate — a second model load blows up RAM and fights for the port (the
-    // cause of a stuck "preparing engine…"). One model per port; restart to swap.
+    // duplicate (a second model load blows up RAM + fights for the port) — BUT only
+    // if it's serving the model we want. Otherwise stop it and boot the right one, so
+    // picking a new model / HF ref actually takes effect instead of silently running
+    // the old model. One model per port.
     if (await this.healthy()) {
-      console.log(`[oxy] reusing llama-server already on :${this.port}`);
-      this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
-      await this.inner.ensureReady();
-      this.ready = true;
-      return;
+      if (await this.servesModel()) {
+        console.log(`[oxy] reusing llama-server already on :${this.port} (${this.expectedModelId()})`);
+        this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
+        await this.inner.ensureReady();
+        this.ready = true;
+        return;
+      }
+      console.log(`[oxy] llama-server on :${this.port} runs a different model — restarting for ${this.expectedModelId()}`);
+      await this.killExisting();
     }
     if (this.variant === "auto") this.variant = await detectVariant();
     this.gpuLayers = this.nglOverride ?? (this.variant === "cpu" ? 0 : 999);
@@ -326,6 +370,7 @@ export class LlamaServerEngine implements Engine {
       } catch {
         /* ignore */
       }
+      await this.killExisting(); // also clear an orphaned/wedged server this instance didn't spawn
       await this.ensureReady();
       return await this.inner!.generate(messages, tools, opts);
     }

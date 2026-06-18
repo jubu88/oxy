@@ -382,12 +382,22 @@ body {
 
 /* timeline */
 .section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
   margin: 0 0 4px 4px;
+}
+.section-timer {
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--outline);
 }
 .timeline {
   position: relative;
@@ -529,6 +539,12 @@ body {
 .tag-pill.done {
   background: rgba(46, 160, 90, 0.12);
   color: #1f7a44;
+}
+.tag-pill.time {
+  font-family: var(--mono);
+  text-transform: none;
+  background: var(--surface-container);
+  color: var(--muted);
 }
 
 /* preview */

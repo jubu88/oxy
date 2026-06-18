@@ -77,6 +77,17 @@ function pickDefaultModel(models: string[]): string {
 
 const projectLabel = (id: string) => id.replace(/-\d{8,}$/, "").replace(/-/g, " ").slice(0, 40) || id;
 
+// Remember the user's engine/model choice across reloads, so a page refresh doesn't
+// snap them back to the auto-recommended engine (the "I picked ollama but it used
+// llama-server" surprise). Falls back to {} on any storage/parse error.
+function loadPrefs(): { engine?: string; model?: string; baseUrl?: string } {
+  try {
+    return JSON.parse(localStorage.getItem("oxy.prefs") || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
 // Read a file's bytes as base64 (no data: prefix).
 function fileToBase64(f: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -123,9 +134,9 @@ async function imageToAttachmentData(f: File, maxEdge = 1024): Promise<{ data: s
 
 export function App() {
   const [status, setStatus] = useState<OxyStatus | null>(null);
-  const [engine, setEngine] = useState("ollama");
-  const [model, setModel] = useState("");
-  const [baseUrl, setBaseUrl] = useState("http://localhost:8080/v1");
+  const [engine, setEngine] = useState(() => loadPrefs().engine || "ollama");
+  const [model, setModel] = useState(() => loadPrefs().model || "");
+  const [baseUrl, setBaseUrl] = useState(() => loadPrefs().baseUrl || "http://localhost:8080/v1");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(false);
   const [useThinking, setUseThinking] = useState(false); // gemma4 thinks by default and over-reasons; off = fast
@@ -145,23 +156,38 @@ export function App() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [liveTokens, setLiveTokens] = useState(0); // tokens streamed in the current turn
   const [, setNowTick] = useState(0); // 1s heartbeat so the elapsed timer re-renders
+  const [stepMs, setStepMs] = useState<number[]>([]); // how long each completed step took (ms), aligned to steps[]
+  const [lastBuildMs, setLastBuildMs] = useState(0); // total wall-clock of the last finished build
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const genStartRef = useRef<number>(0); // when the current generate/turn started
+  const genStartRef = useRef<number>(0); // when the current generate/turn started (resets each step)
+  const buildStartRef = useRef<number>(0); // when the whole build started (never resets) — overall timer
 
   useEffect(() => {
+    const hadSavedEngine = !!loadPrefs().engine;
     getStatus()
       .then((s) => {
         setStatus(s);
-        // smart routing: use the server's recommendation (Ollama only when it'd
-        // run on the GPU; else llama-server, which reaches the GPU via Vulkan)
-        const eng = s.recommended ?? (s.engines.ollama ? "ollama" : "llama-server");
-        setEngine(eng);
-        setModel(eng === "ollama" ? pickDefaultModel(s.models) : "");
+        // smart routing applies only on first run; once the user has explicitly
+        // chosen an engine we keep it (don't override their pick with the default).
+        if (!hadSavedEngine) {
+          const eng = s.recommended ?? (s.engines.ollama ? "ollama" : "llama-server");
+          setEngine(eng);
+          setModel(eng === "ollama" ? pickDefaultModel(s.models) : "");
+        }
       })
       .catch(() => setStatus({ engines: { ollama: false, "llama-server": true }, stitch: false, sd: false, models: [] }));
     getProjects().then(setProjects);
   }, []);
+
+  // persist the engine/model choice so a reload keeps it (no snap-back to the default)
+  useEffect(() => {
+    try {
+      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl }));
+    } catch {
+      /* storage unavailable — non-fatal */
+    }
+  }, [engine, model, baseUrl]);
 
   // 1-second heartbeat so the live "generating…" elapsed timer ticks while building
   useEffect(() => {
@@ -187,6 +213,9 @@ export function App() {
   const liveLabel = building ? `${fmtElapsed(genElapsed)}${liveTokens > 0 ? ` · ${liveTokens} tok · ${Math.round(liveTokens / Math.max(1, genElapsed / 1000))}/s` : ""}` : "";
   // once tokens stream, the model is past loading/prefill — say so, don't linger on "reading images…"
   const displayStatus = building && liveTokens > 0 ? "generating…" : statusMsg;
+  // overall build time — keeps running across steps (unlike the per-turn live timer) and
+  // freezes at the final total when the build ends.
+  const overallElapsed = building ? Date.now() - buildStartRef.current : lastBuildMs;
 
   function changeEngine(next: string) {
     setEngine(next);
@@ -210,9 +239,12 @@ export function App() {
     setBuilding(true);
     setError("");
     setSteps([]);
+    setStepMs([]);
+    setLastBuildMs(0);
     setStatusMsg("starting…");
     setLiveTokens(0);
     genStartRef.current = Date.now();
+    buildStartRef.current = Date.now();
     if (!selProject) setProject(null);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -227,6 +259,8 @@ export function App() {
             setProject(e.project);
           } else if (e.type === "step") {
             setStatusMsg("");
+            const took = Date.now() - genStartRef.current; // how long THIS step took
+            setStepMs((prev) => [...prev, took]);
             setSteps((prev) => [...prev, e.step]);
             setLiveTokens(0); // a turn landed — reset the live counter for the next generate
             genStartRef.current = Date.now();
@@ -244,6 +278,7 @@ export function App() {
     } catch (err: any) {
       if (!ac.signal.aborted) setError(String(err?.message ?? err));
     } finally {
+      setLastBuildMs(Date.now() - buildStartRef.current); // freeze the total
       setBuilding(false);
       setStatusMsg("");
       abortRef.current = null;
@@ -256,9 +291,11 @@ export function App() {
     setBuilding(true);
     setError("");
     setAnswer("");
+    setLastBuildMs(0);
     setStatusMsg("thinking…");
     setLiveTokens(0);
     genStartRef.current = Date.now();
+    buildStartRef.current = Date.now();
     const ac = new AbortController();
     abortRef.current = ac;
     try {
@@ -280,6 +317,7 @@ export function App() {
     } catch (err: any) {
       if (!ac.signal.aborted) setError(String(err?.message ?? err));
     } finally {
+      setLastBuildMs(Date.now() - buildStartRef.current);
       setBuilding(false);
       setStatusMsg("");
       abortRef.current = null;
@@ -417,7 +455,10 @@ export function App() {
                 <span className="label">no models</span>
               )
             ) : engine === "openai" ? (
-              <input className="model-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
+              <>
+                <input className="model-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
+                <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="model id (optional)" spellCheck={false} />
+              </>
             ) : (
               <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemma4 default · or hf:org/repo:quant" spellCheck={false} />
             )}
@@ -452,7 +493,10 @@ export function App() {
 
         {mode === "build" && (steps.length > 0 || building) && (
           <section>
-            <p className="section-title">Build progress</p>
+            <p className="section-title">
+              Build progress
+              {overallElapsed > 0 && <span className="section-timer">{fmtElapsed(overallElapsed)}</span>}
+            </p>
             {displayStatus && steps.length === 0 && (
               <div className="timeline empty">
                 <div className="card">
@@ -478,6 +522,7 @@ export function App() {
                       </div>
                       <div className="tags">
                         {active && liveLabel && <span className="tag-pill live">{liveLabel}</span>}
+                        {!active && stepMs[i] != null && <span className="tag-pill time">{fmtElapsed(stepMs[i])}</span>}
                         {tagsFor(s).map((t) => (
                           <span key={t.label} className={`tag-pill ${t.cls}`}>
                             {t.label}
@@ -494,7 +539,10 @@ export function App() {
 
         {mode === "ask" && (answer || building) && (
           <section>
-            <p className="section-title">Answer</p>
+            <p className="section-title">
+              Answer
+              {overallElapsed > 0 && <span className="section-timer">{fmtElapsed(overallElapsed)}</span>}
+            </p>
             <div className="answer-card">
               {answer ? <div className="answer-text">{answer}</div> : <div className="answer-text muted">{displayStatus || "…"}</div>}
               {building && liveLabel && <div className="answer-live">{liveLabel}</div>}
