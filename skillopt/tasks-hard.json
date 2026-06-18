@@ -1,5 +1,5 @@
 {
-  "_comment": "HARDER SkillOpt benchmark — multi-feature / multi-step / computed-state apps that the easy set (tasks.json, which gemma4 now aces at 1.000) doesn't cover. Interaction checks lean on computed values + selector-independent 'changed' so they stay robust. Use via OXY_SO_TASKS=skillopt/tasks-hard.json.",
+  "_comment": "VERY HARD SkillOpt benchmark — tasks with real algorithmic content (operator precedence, multi-filter state, sorting, scoring, pagination) where a 4B model is most likely to slip. gemma4 aced the first 'harder' set (tip/chained-calc/wizard/filter/stopwatch) at 1.000, so this set escalates. Checks lean on computed values + selector-independent 'changed'. Use via OXY_SO_TASKS=skillopt/tasks-hard.json.",
   "train": [
     {
       "id": "converter",
@@ -8,15 +8,6 @@
         "selectors": ["input", "button"],
         "textIncludes": ["convert"],
         "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "100" } }, { "clickText": "Convert" }], "expect": [{ "contains": "90", "label": "100 dollars converts to 90 euros" }] }]
-      }
-    },
-    {
-      "id": "char-limit",
-      "prompt": "Build a textarea with a live counter below it showing 'used / 100' that updates as you type. Vanilla JS, single index.html. Then call done.",
-      "checks": {
-        "selectors": ["textarea, input"],
-        "textIncludes": ["100"],
-        "interactions": [{ "steps": [{ "fill": { "selector": "textarea, input", "value": "hello" } }], "expect": [{ "contains": "5", "label": "typing 5 chars shows 5 used" }] }]
       }
     },
     {
@@ -31,47 +22,47 @@
   ],
   "val": [
     {
-      "id": "tip-calc",
-      "prompt": "Build a tip calculator in a single index.html with vanilla JS: a bill-amount input, three buttons labeled '10%', '15%', '20%', and a display showing the tip amount AND the total (bill + tip). Then call done.",
-      "checks": {
-        "selectors": ["input", "button"],
-        "textIncludes": ["tip", "total"],
-        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "100" } }, { "clickText": "20%" }], "expect": [{ "contains": "120", "label": "bill 100 + 20% tip = total 120" }] }]
-      }
-    },
-    {
-      "id": "chained-calc",
-      "prompt": "Build a calculator in a single index.html that supports CHAINED operations (e.g. 9 + 1 = then + 5 = keeps computing on the running result) with digit buttons, +, =, and a Clear button. Vanilla JS. Then call done.",
+      "id": "calc-precedence",
+      "prompt": "Build a calculator in a single index.html with vanilla JS: digit buttons and operator buttons +, −, ×, ÷ that respect operator PRECEDENCE (multiply and divide bind tighter than add and subtract), plus = and Clear. So 2 + 3 × 4 = must give 14, not 20. Then call done.",
       "checks": {
         "selectors": ["button"],
-        "interactions": [{ "steps": [{ "clickText": "9" }, { "clickText": "+" }, { "clickText": "1" }, { "clickText": "=" }, { "clickText": "+" }, { "clickText": "5" }, { "clickText": "=" }], "expect": [{ "contains": "15", "label": "9+1=10 then +5= shows 15 (chained)" }] }]
+        "interactions": [{ "steps": [{ "clickText": "2" }, { "clickText": "+" }, { "clickText": "3" }, { "clickText": "×" }, { "clickText": "4" }, { "clickText": "=" }], "expect": [{ "contains": "14", "label": "2 + 3 × 4 = 14 (precedence, not 20)" }] }]
       }
     },
     {
-      "id": "wizard",
-      "prompt": "Build a 2-step signup form in a single index.html with vanilla JS. Step 1: an email field and a 'Next' button. Clicking 'Next' advances to step 2 (a password field) ONLY if the email is non-empty; if empty, stay on step 1 and show an error message. Then call done.",
+      "id": "todomvc",
+      "prompt": "Build a to-do app in a single index.html with vanilla JS: a text input + Add button; each item has a checkbox to complete it and a delete button; and filter buttons 'All', 'Active', 'Completed' that show only the matching items. Then call done.",
       "checks": {
         "selectors": ["input", "button"],
-        "textIncludes": ["email", "next"],
-        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "a@b.com" } }, { "clickText": "Next" }], "expect": [{ "contains": "password", "label": "valid email + Next reveals the password step" }] }]
+        "textIncludes": ["all", "active", "completed"],
+        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "Apple" } }, { "clickText": "Add" }, { "fill": { "selector": "input", "value": "Banana" } }, { "clickText": "Add" }, { "clickText": "Completed" }], "expect": [{ "changed": true, "label": "the Completed filter hides the active items" }] }]
       }
     },
     {
-      "id": "filter-list",
-      "prompt": "Build a searchable list in a single index.html with vanilla JS: a search box above a list of five fruits (Apple, Banana, Cherry, Grape, Orange). Typing filters the list to only the items that match, live. Then call done.",
+      "id": "data-sort",
+      "prompt": "Build a sortable table in a single index.html with vanilla JS: a table of three people — Charlie 30, Alice 50, Bob 10 (columns: name, score) — and a 'Sort by score' button that reorders the rows ascending by score. Then call done.",
       "checks": {
-        "selectors": ["input", "ul, ol"],
-        "textIncludes": ["apple", "banana"],
-        "interactions": [{ "steps": [{ "fill": { "selector": "input", "value": "ap" } }], "expect": [{ "changed": true, "label": "typing 'ap' filters the visible list" }] }]
+        "selectors": ["table, tbody", "button"],
+        "textIncludes": ["charlie", "alice", "bob"],
+        "interactions": [{ "steps": [{ "clickText": "Sort" }], "expect": [{ "changed": true, "label": "Sort reorders the table rows" }] }]
       }
     },
     {
-      "id": "stopwatch",
-      "prompt": "Build a stopwatch in a single index.html with vanilla JS: a time display starting at 00:00, and Start, Stop, and Reset buttons. Start makes the time advance. Then call done.",
+      "id": "quiz",
+      "prompt": "Build a 3-question multiple-choice quiz in a single index.html with vanilla JS. Each question has selectable options, and a Submit button at the end shows the score formatted as N/3. Then call done.",
       "checks": {
         "selectors": ["button"],
-        "textIncludes": ["00:00", "start", "reset"],
-        "interactions": [{ "steps": [{ "clickText": "Start" }, { "waitMs": 1300 }], "expect": [{ "changed": true, "label": "the stopwatch advances after Start" }] }]
+        "textIncludes": ["?"],
+        "interactions": [{ "steps": [{ "clickText": "Submit" }], "expect": [{ "contains": "/3", "label": "Submit shows a score out of 3" }] }]
+      }
+    },
+    {
+      "id": "pagination",
+      "prompt": "Build a paginated list in a single index.html with vanilla JS: 12 numbered items shown 5 per page, with Prev and Next buttons and a 'Page X of 3' indicator that updates. Then call done.",
+      "checks": {
+        "selectors": ["button"],
+        "textIncludes": ["page"],
+        "interactions": [{ "steps": [{ "clickText": "Next" }], "expect": [{ "changed": true, "label": "Next advances to the next page of items" }] }]
       }
     }
   ]
