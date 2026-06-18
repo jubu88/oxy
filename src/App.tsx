@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import type { AgentStep } from "../agent/types.ts";
 import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
@@ -207,8 +207,20 @@ export function App() {
     setBuilding(false);
   };
 
+  // paste an image straight into the prompt (clipboard screenshots / copied images)
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const imgs = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f);
+    if (imgs.length) {
+      e.preventDefault(); // don't also dump the image as junk text
+      void onFiles(imgs);
+    }
+  }
+
   // read attached image/audio files as base64 (gemma4 is multimodal)
-  async function onFiles(files: FileList | null) {
+  async function onFiles(files: FileList | File[] | null) {
     if (!files) return;
     const next: Attachment[] = [];
     for (const f of Array.from(files)) {
@@ -227,7 +239,7 @@ export function App() {
         r.onerror = () => reject(r.error);
         r.readAsDataURL(f);
       });
-      next.push({ kind, mime: f.type, data, name: f.name });
+      next.push({ kind, mime: f.type, data, name: f.name || `pasted.${f.type.split("/")[1] || "png"}` });
     }
     if (next.length) setAttachments((prev) => [...prev, ...next].slice(0, 6));
     if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
@@ -266,6 +278,7 @@ export function App() {
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build();
             }}
+            onPaste={onPaste}
           />
           <div className="attach-row">
             <button className="attach-btn" type="button" onClick={() => fileRef.current?.click()} title="attach an image or audio file (gemma4 is multimodal)">
