@@ -44,6 +44,9 @@ class FakeEngine implements Engine {
       truncated: turn.truncated,
     };
     if (opts.onToken && res.content) opts.onToken(res.content);
+    // mirror the real adapters: tick the progress meter for any generated tokens
+    // (content OR tool-call args), which is what drives the live counter now.
+    if (opts.onProgressTick && (res.content || res.toolCalls.length)) opts.onProgressTick();
     return res;
   }
 }

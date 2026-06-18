@@ -97,6 +97,8 @@ export interface BuildRequest {
   baseUrl?: string;
   /** images/audio attached to the prompt (for a multimodal model like gemma4) */
   attachments?: Attachment[];
+  /** allow the model's reasoning trace (default off — faster; gemma4 over-thinks) */
+  think?: boolean;
 }
 
 // POST a body and stream NDJSON events back as they happen (shared by build + ask).

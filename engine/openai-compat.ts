@@ -79,6 +79,14 @@ export class OpenAICompatEngine implements Engine {
     }
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
     if (opts.numPredict) body.max_tokens = opts.numPredict;
+    // Thinking control. llama.cpp passes chat_template_kwargs into the model's jinja
+    // chat template; thinking-capable templates read `enable_thinking` (templates that
+    // don't simply ignore it). false ⇒ the model skips its reasoning trace and acts
+    // immediately — the difference between a fast build and one that burns the whole
+    // budget thinking. Only send when explicitly set, so a plain server keeps default.
+    if (opts.think === true || opts.think === false) {
+      body.chat_template_kwargs = { ...(body.chat_template_kwargs ?? {}), enable_thinking: opts.think };
+    }
 
     // IDLE (inactivity) timeout — abort only if the stream goes QUIET, never on total
     // wall-clock. A slow-but-streaming generate (the iGPU writing a big file at a few
@@ -116,6 +124,7 @@ export class OpenAICompatEngine implements Engine {
     const decoder = new TextDecoder();
     let buf = "";
     let content = "";
+    let thinking = "";
     const toolFrags = new Map<number, { name: string; args: string }>();
     let promptTokens: number | undefined;
     let evalTokens: number | undefined;
@@ -139,7 +148,17 @@ export class OpenAICompatEngine implements Engine {
       const delta = choice.delta ?? {};
       if (delta.content) {
         content += delta.content;
-        if (!opts.signal?.aborted) opts.onToken?.(delta.content);
+        if (!opts.signal?.aborted) {
+          opts.onToken?.(delta.content);
+          opts.onProgressTick?.();
+        }
+      }
+      // reasoning trace (llama.cpp emits it on delta.reasoning_content) — count it
+      // toward the meter (it's the bulk of the work when thinking is on) but keep it
+      // OUT of content so it never lands in the assistant message / Ask answer.
+      if (delta.reasoning_content) {
+        thinking += delta.reasoning_content;
+        if (!opts.signal?.aborted) opts.onProgressTick?.();
       }
       for (const tc of delta.tool_calls ?? []) {
         const idx = tc.index ?? 0;
@@ -147,12 +166,10 @@ export class OpenAICompatEngine implements Engine {
         if (tc.function?.name) cur.name = tc.function.name;
         if (tc.function?.arguments) {
           cur.args += tc.function.arguments;
-          // A build's main output (write_file's file content) streams as TOOL-CALL
-          // argument fragments, NOT as delta.content — so without ticking progress
-          // here the live token meter reads 0 for minutes during the biggest part of
-          // every build and looks hung. Count tool-call streaming as progress too.
-          // (loop.ts uses the chunk only to count tokens; its liveText is dropped.)
-          if (!opts.signal?.aborted) opts.onToken?.(tc.function.arguments);
+          // A build's main output (write_file's file body) streams as TOOL-CALL
+          // argument fragments, NOT as delta.content — without ticking here the live
+          // meter reads 0 for the biggest, slowest part of every build (looks hung).
+          if (!opts.signal?.aborted) opts.onProgressTick?.();
         }
         toolFrags.set(idx, cur);
       }
@@ -189,6 +206,7 @@ export class OpenAICompatEngine implements Engine {
     }
     return {
       content,
+      thinking: thinking || undefined,
       toolCalls,
       promptTokens,
       evalTokens,

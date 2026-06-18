@@ -73,6 +73,13 @@ export interface AgentConfig {
   attachments?: Attachment[];
   /** which gateable tools (web_search/web_fetch/generate_image/run_command) are enabled */
   enabledTools?: Record<string, boolean>;
+  /**
+   * Enable the model's reasoning/thinking trace (default OFF). Off ⇒ the model goes
+   * straight to tool calls (fast — what made the reasoning-lab builds quick); on ⇒ it
+   * reasons each turn first (slower, can help hard logic). gemma4 thinks by default
+   * and will spend its whole budget reasoning, so Oxy suppresses it unless asked.
+   */
+  thinking?: boolean;
 }
 
 /** A file on disk in a project, as the backend reports it. */

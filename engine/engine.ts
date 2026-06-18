@@ -53,11 +53,17 @@ export interface GenerateOptions {
   temperature?: number;
   numCtx?: number;
   numPredict?: number;
-  /** enable a one-shot reasoning burst for this turn (trace returned, NOT persisted) */
+  /** allow the model's reasoning/thinking trace this turn (trace returned, NOT
+   *  persisted). false ⇒ ask the backend to suppress thinking so the model acts
+   *  immediately (gemma4 otherwise burns its whole budget reasoning). */
   think?: boolean;
   signal?: AbortSignal;
-  /** streamed assistant tokens, for a live progress meter */
+  /** streamed assistant CONTENT tokens (for live display / the Ask answer) */
   onToken?: (chunk: string) => void;
+  /** fires once per generated token of ANY kind — content, reasoning/thinking, OR a
+   *  tool-call argument fragment. Drives the live token meter so it doesn't read 0
+   *  while the model thinks or streams a write_file's body as a tool call. */
+  onProgressTick?: () => void;
 }
 
 export interface GenerateResult {

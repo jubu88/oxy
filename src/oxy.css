@@ -364,6 +364,12 @@ body {
   color: var(--muted);
 }
 
+.build-opts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
 .stitch-toggle {
   display: inline-flex;
   align-items: center;

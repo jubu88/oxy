@@ -128,6 +128,7 @@ export function App() {
   const [baseUrl, setBaseUrl] = useState("http://localhost:8080/v1");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(false);
+  const [useThinking, setUseThinking] = useState(false); // gemma4 thinks by default and over-reasons; off = fast
   const [mode, setMode] = useState<"build" | "ask">("build"); // build an app vs. one-shot Q&A
   const [answer, setAnswer] = useState(""); // ask-mode response
 
@@ -218,7 +219,7 @@ export function App() {
     let builtId = selProject || "";
     try {
       await runBuild(
-        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        { task: task.trim(), engine, model: model || undefined, useStitch, think: useThinking, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: BuildEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "project") {
@@ -262,7 +263,7 @@ export function App() {
     abortRef.current = ac;
     try {
       await runAsk(
-        { task: task.trim(), engine, model: model || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        { task: task.trim(), engine, model: model || undefined, think: useThinking, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: AskEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "delta") {
@@ -435,11 +436,16 @@ export function App() {
             <span className="tag">context</span>
           </div>
 
-          {status?.stitch && (
-            <label className="stitch-toggle" title="let the model use Google Stitch (cloud) for the page design">
-              <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} /> design with Stitch
+          <div className="build-opts">
+            <label className="stitch-toggle" title="let the model reason before acting — slower, can help hard logic; OFF goes straight to building (recommended)">
+              <input type="checkbox" checked={useThinking} onChange={(e) => setUseThinking(e.target.checked)} /> thinking
             </label>
-          )}
+            {status?.stitch && (
+              <label className="stitch-toggle" title="let the model use Google Stitch (cloud) for the page design">
+                <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} /> design with Stitch
+              </label>
+            )}
+          </div>
         </section>
 
         {error && <div className="banner error">{error}</div>}

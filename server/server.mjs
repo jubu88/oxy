@@ -630,6 +630,7 @@ export async function codelabHandler(req, res, next) {
             systemOverride,
             attachments: attachments && attachments.length ? attachments : undefined,
             enabledTools: readSettings().tools,
+            thinking: !!body.think, // default OFF — gemma4 otherwise burns its budget reasoning
           },
           {
             engine,
@@ -712,6 +713,7 @@ export async function codelabHandler(req, res, next) {
           {
             temperature: Number(body.temperature) || 0.4,
             numPredict: Number(body.numPredict) || 1024,
+            think: !!body.think, // default OFF (fast answers); the UI toggle can enable it
             signal: ac.signal,
             onToken: (t) => {
               answer += t;

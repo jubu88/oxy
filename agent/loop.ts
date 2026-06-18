@@ -79,7 +79,16 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   let lastCritique = ""; // verbatim latest review_design critique (never summarized away)
   let styleChosen = ""; // design system name once get_design_system succeeds
   const outstandingErrors: string[] = config.consoleErrors?.length ? [...config.consoleErrors] : [];
-  let thinkNext = outstandingErrors.length > 0; // arm a one-shot burst for iter 0 only if seeded with errors
+  // Thinking defaults OFF for speed (gemma4 otherwise spends its whole budget on a
+  // reasoning trace before acting — the "5 min, no output" cause). The user toggle
+  // forces it ON every turn; OFF still arms sparing one-shot bursts only when a turn
+  // needs it (critique/error/truncation/ramble). This requires the engine to actually
+  // honor `think` — openai-compat now sends enable_thinking so llama-server's gemma4
+  // stops thinking when told (it ignored it before, so it always thought = slow).
+  const thinkingOn = !!config.thinking;
+  // think on turn 0 if the user enabled thinking OR we were seeded with runtime errors
+  // to fix (a one-shot recovery burst helps reason about the fix, even when off).
+  let thinkNext = thinkingOn || outstandingErrors.length > 0;
 
   // Compact at a consistent loop boundary: re-fetch the authoritative file list,
   // persist a checkpoint (survives crash/sleep), then replace the growing history
@@ -137,8 +146,13 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
         think: ranWithThink,
         signal,
         onToken: (chunk) => {
+          liveText += chunk; // content only (used for the downstream-dropped progress text)
+        },
+        onProgressTick: () => {
+          // count EVERY generated token — content, reasoning, OR tool-call arg — so the
+          // meter reflects real work instead of sitting at 0 while the model thinks or
+          // streams a write_file body.
           liveTokens++;
-          liveText += chunk;
           onProgress?.({ iteration: i, text: liveText || "thinking / building…", tokens: liveTokens });
         },
       });
@@ -207,10 +221,12 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
       return;
     }
 
-    // arm a one-shot thinking burst for the NEXT turn iff THIS turn surfaced something
-    // worth reasoning about (a critique to act on, a tool error, or a truncated write).
-    // Recomputed every turn from only this turn's results => auto-resets, can't re-fire stale.
+    // thinking for the NEXT turn: the user toggle forces it ON for EVERY turn; with
+    // the toggle off (default) we still arm a one-shot burst only when THIS turn
+    // surfaced something worth reasoning about — a design critique to act on, a tool
+    // error, or a truncated write. Recomputed each turn ⇒ auto-resets, never stale.
     thinkNext =
+      thinkingOn ||
       toolCalls.some((t) => t.name === "review_design" && t.result.startsWith("DESIGN CRITIQUE:")) ||
       toolCalls.some((t) => t.result.startsWith("error:")) ||
       truncated;
@@ -240,7 +256,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
           ? "You replied with text but called no tool. Do NOT write code or prose in chat — the ONLY way to create the page is to CALL the write_file tool with { path, content }. Respond now with a single tool call."
           : "Continue building with tool calls, or call done if index.html is complete.",
       });
-      if (rambled) thinkNext = true;
+      if (rambled) thinkNext = true; // one-shot recovery burst even when thinking is off — a model that rambled needs the nudge to emit a real tool call
     }
   }
 }

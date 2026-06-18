@@ -159,10 +159,21 @@ export class OllamaEngine implements Engine {
       const m = chunk.message ?? {};
       if (m.content) {
         content += m.content;
-        if (!opts.signal?.aborted) opts.onToken?.(m.content);
+        if (!opts.signal?.aborted) {
+          opts.onToken?.(m.content);
+          opts.onProgressTick?.();
+        }
       }
-      if (m.thinking) thinking += m.thinking;
-      if (m.tool_calls?.length) rawToolCalls.push(...m.tool_calls);
+      // thinking + tool calls are real generated tokens too — tick the meter so it
+      // doesn't sit at 0 while gemma4 reasons or emits a write_file tool call.
+      if (m.thinking) {
+        thinking += m.thinking;
+        if (!opts.signal?.aborted) opts.onProgressTick?.();
+      }
+      if (m.tool_calls?.length) {
+        rawToolCalls.push(...m.tool_calls);
+        if (!opts.signal?.aborted) opts.onProgressTick?.();
+      }
       if (chunk.done) {
         evalCount = chunk.eval_count ?? evalCount;
         promptEvalCount = chunk.prompt_eval_count ?? promptEvalCount;
