@@ -57,6 +57,12 @@ function processorLabel(engine: string, status: OxyStatus | null): string {
   return (status.gpu ?? "cpu").toUpperCase();
 }
 
+// elapsed as M:SS for the live "generating…" indicator
+function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 // Prefer a coder/instruct model; never auto-pick a vision/embedding model.
 function pickDefaultModel(models: string[]): string {
   const isAux = (m: string) => /vl|vision|moondream|embed|clip/i.test(m);
@@ -91,8 +97,11 @@ export function App() {
   const [error, setError] = useState("");
   const [previewKey, setPreviewKey] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [liveTokens, setLiveTokens] = useState(0); // tokens streamed in the current turn
+  const [, setNowTick] = useState(0); // 1s heartbeat so the elapsed timer re-renders
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const genStartRef = useRef<number>(0); // when the current generate/turn started
 
   useEffect(() => {
     getStatus()
@@ -108,6 +117,13 @@ export function App() {
     getProjects().then(setProjects);
   }, []);
 
+  // 1-second heartbeat so the live "generating…" elapsed timer ticks while building
+  useEffect(() => {
+    if (!building) return;
+    const t = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [building]);
+
   const ctxPct = useMemo(() => {
     const last = [...steps].reverse().find((s) => typeof s.ctxTokens === "number");
     if (!last?.ctxTokens) return 0;
@@ -120,6 +136,9 @@ export function App() {
   const iterating = !!selProject;
   const modelOptions = engine === "ollama" ? status?.models ?? [] : [];
   const proc = processorLabel(engine, status);
+  // live "generating…" indicator: elapsed since the current turn began + streamed tokens/rate
+  const genElapsed = building ? Date.now() - genStartRef.current : 0;
+  const liveLabel = building ? `${fmtElapsed(genElapsed)}${liveTokens > 0 ? ` · ${liveTokens} tok · ${Math.round(liveTokens / Math.max(1, genElapsed / 1000))}/s` : ""}` : "";
 
   function changeEngine(next: string) {
     setEngine(next);
@@ -144,6 +163,8 @@ export function App() {
     setError("");
     setSteps([]);
     setStatusMsg("starting…");
+    setLiveTokens(0);
+    genStartRef.current = Date.now();
     if (!selProject) setProject(null);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -159,7 +180,11 @@ export function App() {
           } else if (e.type === "step") {
             setStatusMsg("");
             setSteps((prev) => [...prev, e.step]);
+            setLiveTokens(0); // a turn landed — reset the live counter for the next generate
+            genStartRef.current = Date.now();
             if (e.step.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name))) setPreviewKey((k) => k + 1);
+          } else if (e.type === "progress") {
+            setLiveTokens(e.tokens);
           } else if (e.type === "done") setPreviewKey((k) => k + 1);
           else if (e.type === "error") setError(e.message);
         },
@@ -330,6 +355,7 @@ export function App() {
                     <span className="material-symbols-outlined">hourglass_top</span>
                     <code>{statusMsg}</code>
                   </div>
+                  {liveLabel && <span className="live">{liveLabel}</span>}
                 </div>
               </div>
             )}
@@ -346,6 +372,7 @@ export function App() {
                         <code>{stepLabel(s)}</code>
                       </div>
                       <div className="tags">
+                        {active && liveLabel && <span className="tag-pill live">{liveLabel}</span>}
                         {tagsFor(s).map((t) => (
                           <span key={t.label} className={`tag-pill ${t.cls}`}>
                             {t.label}

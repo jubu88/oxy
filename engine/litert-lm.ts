@@ -44,6 +44,28 @@ async function resolveBin(): Promise<string> {
   return (cachedBin = "litert-lm"); // last resort — errors clearly if absent
 }
 
+// Kill whatever is listening on `port` — used to clear a dead/zombie serve before
+// rebooting (the engine may have reused a serve it doesn't own). Best-effort.
+async function killPort(port: number): Promise<void> {
+  try {
+    if (process.platform === "win32") {
+      const { stdout } = await execFileP("netstat", ["-ano"], { timeout: 8000 });
+      const pids = new Set<string>();
+      for (const line of stdout.split("\n")) {
+        if (line.includes(`:${port} `) && /LISTENING/i.test(line)) {
+          const pid = line.trim().split(/\s+/).pop();
+          if (pid && /^\d+$/.test(pid)) pids.add(pid);
+        }
+      }
+      for (const pid of pids) await execFileP("taskkill", ["/F", "/PID", pid], { timeout: 8000 }).catch(() => {});
+    } else {
+      await execFileP("sh", ["-c", `lsof -ti tcp:${port} | xargs -r kill -9`], { timeout: 8000 }).catch(() => {});
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
 export interface LiteRtLmOptions {
   /** imported model id (litert-lm list), e.g. "oxy-gemma4" or "oxy-gemma4,gpu" */
   model?: string;
@@ -123,7 +145,20 @@ export class LiteRtLmEngine implements Engine {
   }
   async generate(messages: ChatMessage[], tools: ToolDef[], opts: GenerateOptions): Promise<GenerateResult> {
     await this.ensureReady();
-    return this.inner!.generate(messages, tools, opts);
+    try {
+      return await this.inner!.generate(messages, tools, opts);
+    } catch (e: any) {
+      if (opts.signal?.aborted) throw e; // genuine user cancel — don't reboot
+      // the serve can drop the connection ("terminated") under memory pressure or
+      // crash. Reboot it (clearing a zombie on the port) and retry once so one
+      // blip doesn't fail the whole build. (A persistent OOM will still fail —
+      // that needs freeing RAM, not a retry.)
+      console.warn(`[oxy] litert-lm generate failed (${String(e?.message ?? e).slice(0, 80)}) — rebooting serve and retrying once`);
+      await this.dispose();
+      await killPort(this.port);
+      await this.ensureReady();
+      return await this.inner!.generate(messages, tools, opts);
+    }
   }
   async dispose(): Promise<void> {
     this.child?.kill();
