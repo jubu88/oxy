@@ -17,6 +17,9 @@ export interface OpenAICompatOptions {
   model?: string;
   /** optional bearer token (LM Studio/llama-server ignore it; remote endpoints need it) */
   apiKey?: string;
+  /** true (default): abort a generate only after an idle stretch (slow-but-streaming
+   *  generates run to completion). false: legacy total wall-clock cap (A/B toggle). */
+  idleTimeout?: boolean;
 }
 
 export class OpenAICompatEngine implements Engine {
@@ -24,11 +27,13 @@ export class OpenAICompatEngine implements Engine {
   private baseUrl: string;
   private model: string;
   private apiKey?: string;
+  private idleTimeout: boolean;
 
   constructor(opts: OpenAICompatOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? process.env.OXY_OPENAI_BASE ?? DEFAULT_BASE).replace(/\/+$/, "");
     this.model = opts.model ?? process.env.OXY_MODEL ?? "";
     this.apiKey = opts.apiKey ?? process.env.OXY_OPENAI_KEY;
+    this.idleTimeout = opts.idleTimeout !== false;
   }
 
   private headers(): Record<string, string> {
@@ -95,14 +100,18 @@ export class OpenAICompatEngine implements Engine {
     // timeout used to kill legit slow generates here, after which llama-server.ts
     // rebooted and retried the turn from scratch — looping forever on any non-trivial
     // build. That regression is what this replaces.
+    const idleMode = this.idleTimeout; // false ⇒ legacy total wall-clock cap (A/B toggle)
     const idleMs = Number(process.env.OXY_GEN_IDLE_TIMEOUT_MS) || 120_000;
+    const totalMs = Number(process.env.OXY_GEN_TIMEOUT_MS) || 600_000;
     const ctrl = new AbortController();
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     const kick = () => {
+      if (!idleMode) return; // total mode: one fixed timer (set below), never reset by activity
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => ctrl.abort(new Error(`generate stalled (no tokens for ${Math.round(idleMs / 1000)}s)`)), idleMs);
     };
-    kick();
+    if (idleMode) kick();
+    else idleTimer = setTimeout(() => ctrl.abort(new Error(`generate timeout (${Math.round(totalMs / 1000)}s total)`)), totalMs);
     const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
     let res: Response;
     try {

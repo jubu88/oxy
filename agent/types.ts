@@ -80,6 +80,12 @@ export interface AgentConfig {
    * and will spend its whole budget reasoning, so Oxy suppresses it unless asked.
    */
   thinking?: boolean;
+  /** auto-compact: checkpoint + reseed a fresh small context when it fills (default ON).
+   *  Off ⇒ let the context grow until truncation (for A/B testing the feature). */
+  autoCompact?: boolean;
+  /** one-shot reasoning bursts after an error/critique/ramble/seeded-error (default ON).
+   *  Off ⇒ never auto-think on those moments (only the explicit `thinking` toggle). */
+  recoveryBursts?: boolean;
 }
 
 /** A file on disk in a project, as the backend reports it. */

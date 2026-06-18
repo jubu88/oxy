@@ -80,7 +80,7 @@ const projectLabel = (id: string) => id.replace(/-\d{8,}$/, "").replace(/-/g, " 
 // Remember the user's engine/model choice across reloads, so a page refresh doesn't
 // snap them back to the auto-recommended engine (the "I picked ollama but it used
 // llama-server" surprise). Falls back to {} on any storage/parse error.
-function loadPrefs(): { engine?: string; model?: string; baseUrl?: string } {
+function loadPrefs(): { engine?: string; model?: string; baseUrl?: string; useStitch?: boolean } {
   try {
     return JSON.parse(localStorage.getItem("oxy.prefs") || "{}") || {};
   } catch {
@@ -138,8 +138,7 @@ export function App() {
   const [model, setModel] = useState(() => loadPrefs().model || "");
   const [baseUrl, setBaseUrl] = useState(() => loadPrefs().baseUrl || "http://localhost:8080/v1");
   const [task, setTask] = useState("");
-  const [useStitch, setUseStitch] = useState(false);
-  const [useThinking, setUseThinking] = useState(false); // gemma4 thinks by default and over-reasons; off = fast
+  const [useStitch, setUseStitch] = useState(() => !!loadPrefs().useStitch);
   const [mode, setMode] = useState<"build" | "ask">("build"); // build an app vs. one-shot Q&A
   const [answer, setAnswer] = useState(""); // ask-mode response
 
@@ -183,11 +182,11 @@ export function App() {
   // persist the engine/model choice so a reload keeps it (no snap-back to the default)
   useEffect(() => {
     try {
-      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl }));
+      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl, useStitch }));
     } catch {
       /* storage unavailable — non-fatal */
     }
-  }, [engine, model, baseUrl]);
+  }, [engine, model, baseUrl, useStitch]);
 
   // 1-second heartbeat so the live "generating…" elapsed timer ticks while building
   useEffect(() => {
@@ -206,7 +205,7 @@ export function App() {
   const selHasIndex = !!projects.find((p) => p.id === project)?.hasIndex;
   const canPreview = !!project && (hasWritten || selHasIndex);
   const iterating = !!selProject;
-  const modelOptions = engine === "ollama" ? status?.models ?? [] : [];
+  const features = status?.features ?? {};
   const proc = processorLabel(engine, status);
   // live "generating…" indicator: elapsed since the current turn began + streamed tokens/rate
   const genElapsed = building ? Date.now() - genStartRef.current : 0;
@@ -251,7 +250,7 @@ export function App() {
     let builtId = selProject || "";
     try {
       await runBuild(
-        { task: task.trim(), engine, model: model || undefined, useStitch, think: useThinking, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: BuildEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "project") {
@@ -300,7 +299,7 @@ export function App() {
     abortRef.current = ac;
     try {
       await runAsk(
-        { task: task.trim(), engine, model: model || undefined, think: useThinking, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        { task: task.trim(), engine, model: model || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: AskEvent) => {
           if (e.type === "status") setStatusMsg(e.message);
           else if (e.type === "delta") {
@@ -357,10 +356,11 @@ export function App() {
         setError(`${f.name} is too large (max 12 MB)`);
         continue;
       }
-      // images get downscaled (huge screenshots = slow vision prefill on an iGPU);
-      // audio passes through as raw base64.
+      // images get downscaled (huge screenshots = slow vision prefill on an iGPU) unless
+      // the feature is toggled off in Settings; audio passes through as raw base64.
+      const downscale = status?.features?.downscaleImages !== false;
       const { data, mime } =
-        kind === "image" ? await imageToAttachmentData(f) : { data: await fileToBase64(f), mime: f.type };
+        kind === "image" && downscale ? await imageToAttachmentData(f) : { data: await fileToBase64(f), mime: f.type };
       next.push({ kind, mime, data, name: f.name || `pasted.${mime.split("/")[1] || "png"}` });
     }
     if (next.length) setAttachments((prev) => [...prev, ...next].slice(0, 6));
@@ -435,39 +435,20 @@ export function App() {
         <p className="helper">{mode === "ask" ? "⌘/Ctrl + Enter to ask — attach or paste an image" : iterating ? "iterating — Oxy reads the current files and edits in place" : "⌘/Ctrl + Enter to build"}</p>
 
         <section className="status-row">
-          <div className="pill" title="active engine and model">
+          <button className="pill info-pill" title="active engine and model — click to change in Settings" onClick={() => setShowSettings(true)}>
             <span className="material-symbols-outlined">memory</span>
-            <select className="engine" value={engine} onChange={(e) => changeEngine(e.target.value)}>
-              {status?.engines.ollama && <option value="ollama">ollama</option>}
-              <option value="llama-server">llama-server</option>
-              <option value="openai">openai</option>
-            </select>
-            {engine === "ollama" ? (
-              modelOptions.length ? (
-                <select value={model} onChange={(e) => setModel(e.target.value)}>
-                  {modelOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="label">no models</span>
-              )
-            ) : engine === "openai" ? (
-              <>
-                <input className="model-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
-                <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="model id (optional)" spellCheck={false} />
-              </>
-            ) : (
-              <input className="model-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemma4 default · or hf:org/repo:quant" spellCheck={false} />
-            )}
+            <span className="info-engine">{engine}</span>
+            <span className="info-sep">·</span>
+            <span className="info-model">{engine === "ollama" ? model || "default" : engine === "openai" ? model || "default" : model || "gemma4"}</span>
+            {features.thinking && <span className="info-flag">thinking</span>}
+            {useStitch && status?.stitch && <span className="info-flag">Stitch</span>}
             {proc && (
               <span className={"proc" + (proc === "CPU" ? " cpu" : "")} title={status?.recommendReason || "where this engine runs"}>
                 {proc}
               </span>
             )}
-          </div>
+            <span className="material-symbols-outlined info-gear">settings</span>
+          </button>
 
           <div className="context" title="how full the model's context window is">
             <span className="num">{ctxPct}%</span>
@@ -475,17 +456,6 @@ export function App() {
               <div className="fill" style={{ width: `${ctxPct}%` }} />
             </div>
             <span className="tag">context</span>
-          </div>
-
-          <div className="build-opts">
-            <label className="stitch-toggle" title="let the model reason before acting — slower, can help hard logic; OFF goes straight to building (recommended)">
-              <input type="checkbox" checked={useThinking} onChange={(e) => setUseThinking(e.target.checked)} /> thinking
-            </label>
-            {status?.stitch && (
-              <label className="stitch-toggle" title="let the model use Google Stitch (cloud) for the page design">
-                <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} /> design with Stitch
-              </label>
-            )}
           </div>
         </section>
 
@@ -584,7 +554,23 @@ export function App() {
       </div>
 
       {showSettings && (
-        <Settings stitchAvailable={!!status?.stitch} tools={status?.tools} terminalMode={status?.terminalMode} onClose={() => setShowSettings(false)} onSaved={() => getStatus().then(setStatus).catch(() => {})} />
+        <Settings
+          status={status}
+          stitchAvailable={!!status?.stitch}
+          engine={engine}
+          onEngineChange={changeEngine}
+          model={model}
+          setModel={setModel}
+          baseUrl={baseUrl}
+          setBaseUrl={setBaseUrl}
+          useStitch={useStitch}
+          setUseStitch={setUseStitch}
+          tools={status?.tools}
+          terminalMode={status?.terminalMode}
+          features={status?.features}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => getStatus().then(setStatus).catch(() => {})}
+        />
       )}
     </>
   );

@@ -45,6 +45,11 @@ export interface LlamaServerOptions {
   gpuLayers?: number;
   /** multimodal projector (.gguf) for vision/audio; auto-detected next to a local model */
   mmproj?: string;
+  /** pass through to the OpenAI-compat transport (idle vs total generate timeout) */
+  idleTimeout?: boolean;
+  /** true (default): only reuse a running server if it serves the requested model;
+   *  false: reuse any healthy server regardless of model (legacy, A/B toggle) */
+  modelAwareReuse?: boolean;
 }
 
 async function extractArchive(archive: string, destDir: string): Promise<void> {
@@ -177,6 +182,8 @@ export class LlamaServerEngine implements Engine {
   private gpuLayers = 0;
   private nglOverride: number | null;
   private mmproj: string | null;
+  private idleTimeout: boolean;
+  private modelAware: boolean;
   private child: ChildProcess | null = null;
   private inner: OpenAICompatEngine | null = null;
   private ready = false;
@@ -189,6 +196,8 @@ export class LlamaServerEngine implements Engine {
     this.contextSize = opts.contextSize ?? (process.env.OXY_LLAMA_CTX ? Number(process.env.OXY_LLAMA_CTX) : 16384);
     this.nglOverride = opts.gpuLayers ?? (process.env.OXY_LLAMA_NGL ? Number(process.env.OXY_LLAMA_NGL) : null);
     this.mmproj = opts.mmproj ?? process.env.OXY_LLAMA_MMPROJ ?? null;
+    this.idleTimeout = opts.idleTimeout !== false;
+    this.modelAware = opts.modelAwareReuse !== false;
   }
 
   // Multimodal projector for vision/audio. Explicit option/env wins; otherwise, for
@@ -283,9 +292,9 @@ export class LlamaServerEngine implements Engine {
     // picking a new model / HF ref actually takes effect instead of silently running
     // the old model. One model per port.
     if (await this.healthy()) {
-      if (await this.servesModel()) {
+      if (!this.modelAware || (await this.servesModel())) {
         console.log(`[oxy] reusing llama-server already on :${this.port} (${this.expectedModelId()})`);
-        this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
+        this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1`, idleTimeout: this.idleTimeout });
         await this.inner.ensureReady();
         this.ready = true;
         return;
@@ -338,7 +347,7 @@ export class LlamaServerEngine implements Engine {
       throw new Error(`${String(e?.message ?? e)}${stderrTail ? `\nllama-server: ${stderrTail.slice(-400)}` : ""}`);
     }
     // drive the running server through the OpenAI-compatible adapter
-    this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1` });
+    this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1`, idleTimeout: this.idleTimeout });
     await this.inner.ensureReady();
   }
 

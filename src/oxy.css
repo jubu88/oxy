@@ -895,3 +895,105 @@ body {
 .btn-ghost:hover {
   border-color: color-mix(in srgb, var(--primary) 40%, transparent);
 }
+
+/* ---- main-page read-only engine/model info (click → Settings) ---- */
+.info-pill {
+  cursor: pointer;
+  font: inherit;
+}
+.info-pill:hover {
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.info-engine {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  font-weight: 500;
+}
+.info-sep {
+  color: var(--outline);
+}
+.info-model {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 36vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.info-flag {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+}
+.info-gear {
+  font-size: 16px !important;
+  color: var(--outline);
+  margin-left: 2px;
+}
+
+/* ---- full settings page ---- */
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow-y: auto;
+  background: var(--surface);
+  padding: 32px 16px 64px;
+}
+.settings-inner {
+  width: min(720px, 94vw);
+  margin: 0 auto;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+.settings-section {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 25%, transparent);
+}
+.settings-section h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.section-note {
+  margin: -4px 0 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.settings-section .field + .field {
+  margin-top: 14px;
+}
+.settings-select,
+.settings-section .field > input {
+  background: var(--surface-low);
+  border: 1px solid color-mix(in srgb, var(--outline-variant) 35%, transparent);
+  border-radius: var(--radius-xl);
+  padding: 10px 13px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.settings-select:focus,
+.settings-section .field > input:focus {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+}

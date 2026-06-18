@@ -57,12 +57,27 @@ function stitchApiKey() {
 // is OFF by default; terminal mode defaults to the isolated container.
 const SETTINGS_PATH = path.resolve(ROOT, "oxy.settings.json");
 const DEFAULT_TOOLS = { web_search: true, web_fetch: true, generate_image: true, run_command: false };
+// Toggleable "improvement" features — persisted so they can be A/B tested with/without.
+// Defaults reflect the recommended (improved) behavior.
+const DEFAULT_FEATURES = {
+  thinking: false, //         model reasons each turn (OFF = fast: straight to tool calls)
+  autoCompact: true, //       checkpoint + reseed when the context fills (long builds)
+  recoveryBursts: true, //    one-shot reasoning burst after an error/critique/ramble
+  downscaleImages: true, //   shrink large attached images before sending (client-side)
+  idleTimeout: true, //       abort a generate only after 120s idle (vs an old 600s total cap)
+  modelAwareReuse: true, //   restart llama-server when a different model is selected
+};
+const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES);
 function readSettings() {
   try {
     const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
-    return { tools: { ...DEFAULT_TOOLS, ...(s.tools || {}) }, terminalMode: ["container", "host", "disabled"].includes(s.terminalMode) ? s.terminalMode : "container" };
+    return {
+      tools: { ...DEFAULT_TOOLS, ...(s.tools || {}) },
+      terminalMode: ["container", "host", "disabled"].includes(s.terminalMode) ? s.terminalMode : "container",
+      features: { ...DEFAULT_FEATURES, ...(s.features || {}) },
+    };
   } catch {
-    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container" };
+    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container", features: { ...DEFAULT_FEATURES } };
   }
 }
 function writeSettings(next) {
@@ -70,7 +85,9 @@ function writeSettings(next) {
   const tools = { ...cur.tools };
   if (next.tools && typeof next.tools === "object") for (const k of Object.keys(DEFAULT_TOOLS)) if (typeof next.tools[k] === "boolean") tools[k] = next.tools[k];
   const terminalMode = ["container", "host", "disabled"].includes(next.terminalMode) ? next.terminalMode : cur.terminalMode;
-  const merged = { tools, terminalMode };
+  const features = { ...cur.features };
+  if (next.features && typeof next.features === "object") for (const k of FEATURE_KEYS) if (typeof next.features[k] === "boolean") features[k] = next.features[k];
+  const merged = { tools, terminalMode, features };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), "utf8");
   return merged;
 }
@@ -453,14 +470,14 @@ export async function stitchGenerate(prompt, opts = {}) {
 }
 
 // Construct an Engine from a request body (shared by /build and /ask).
-async function engineFromBody(body) {
+async function engineFromBody(body, features = DEFAULT_FEATURES) {
   if (body.engine === "openai") {
     const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
-    return new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
+    return new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey, idleTimeout: features.idleTimeout });
   }
   if (body.engine === "llama-server") {
     const { LlamaServerEngine } = await import("../engine/llama-server.ts");
-    return new LlamaServerEngine({ modelRef: body.model || undefined });
+    return new LlamaServerEngine({ modelRef: body.model || undefined, idleTimeout: features.idleTimeout, modelAwareReuse: features.modelAwareReuse });
   }
   const { OllamaEngine } = await import("../engine/ollama.ts");
   return new OllamaEngine({ model: body.model });
@@ -532,6 +549,7 @@ export async function codelabHandler(req, res, next) {
         models,
         tools: settings.tools,
         terminalMode: settings.terminalMode,
+        features: settings.features,
       });
     }
 
@@ -546,8 +564,8 @@ export async function codelabHandler(req, res, next) {
           else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
         }
         let settings = readSettings();
-        if (body.tools || body.terminalMode) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode });
-        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode });
+        if (body.tools || body.terminalMode || body.features) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode, features: body.features });
+        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode, features: settings.features });
       } catch (e) {
         return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
       }
@@ -595,7 +613,8 @@ export async function codelabHandler(req, res, next) {
       try {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
-        const engine = await engineFromBody(body);
+        const features = readSettings().features;
+        const engine = await engineFromBody(body, features);
         send({ type: "status", message: "loading model…" });
         await engine.ensureReady();
         const baseUrl = `http://${req.headers.host}`;
@@ -630,7 +649,9 @@ export async function codelabHandler(req, res, next) {
             systemOverride,
             attachments: attachments && attachments.length ? attachments : undefined,
             enabledTools: readSettings().tools,
-            thinking: !!body.think, // default OFF — gemma4 otherwise burns its budget reasoning
+            thinking: features.thinking, // gemma4 otherwise burns its budget reasoning (default OFF)
+            autoCompact: features.autoCompact,
+            recoveryBursts: features.recoveryBursts,
           },
           {
             engine,
@@ -696,7 +717,8 @@ export async function codelabHandler(req, res, next) {
       const ac = new AbortController();
       req.on("close", () => ac.abort());
       try {
-        const engine = await engineFromBody(body);
+        const features = readSettings().features;
+        const engine = await engineFromBody(body, features);
         send({ type: "status", message: "loading model…" });
         await engine.ensureReady();
         const attachments = Array.isArray(body.attachments)
@@ -713,7 +735,7 @@ export async function codelabHandler(req, res, next) {
           {
             temperature: Number(body.temperature) || 0.4,
             numPredict: Number(body.numPredict) || 1024,
-            think: !!body.think, // default OFF (fast answers); the UI toggle can enable it
+            think: features.thinking, // default OFF (fast answers); the thinking feature can enable it
             signal: ac.signal,
             onToken: (t) => {
               answer += t;

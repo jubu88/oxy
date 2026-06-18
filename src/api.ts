@@ -17,6 +17,8 @@ export interface OxyStatus {
   tools?: Record<string, boolean>;
   /** terminal sandbox mode: "container" | "host" | "disabled" */
   terminalMode?: string;
+  /** toggleable "improvement" features (thinking/autoCompact/idleTimeout/…) for A/B testing */
+  features?: Record<string, boolean>;
 }
 
 export type BuildEvent =
@@ -39,7 +41,14 @@ export type AskEvent =
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
-  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode };
+  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode, features: j.features };
+}
+
+/** Toggle the "improvement" feature flags (server persists them; A/B testing). */
+export async function saveFeatures(features: Record<string, boolean>): Promise<Record<string, boolean> | null> {
+  const r = await fetch("/oxy/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ features }) });
+  const j = await r.json();
+  return j.ok ? j.features : null;
 }
 
 /** Toggle gateable tools / set the terminal sandbox mode (server persists them). */

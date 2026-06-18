@@ -86,9 +86,10 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   // honor `think` — openai-compat now sends enable_thinking so llama-server's gemma4
   // stops thinking when told (it ignored it before, so it always thought = slow).
   const thinkingOn = !!config.thinking;
-  // think on turn 0 if the user enabled thinking OR we were seeded with runtime errors
-  // to fix (a one-shot recovery burst helps reason about the fix, even when off).
-  let thinkNext = thinkingOn || outstandingErrors.length > 0;
+  const recoveryBursts = config.recoveryBursts !== false; // default ON (A/B toggle)
+  // think on turn 0 if the user enabled thinking OR (recovery on AND) we were seeded
+  // with runtime errors to fix (a one-shot burst helps reason about the fix).
+  let thinkNext = thinkingOn || (recoveryBursts && outstandingErrors.length > 0);
 
   // Compact at a consistent loop boundary: re-fetch the authoritative file list,
   // persist a checkpoint (survives crash/sleep), then replace the growing history
@@ -227,13 +228,14 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     // error, or a truncated write. Recomputed each turn ⇒ auto-resets, never stale.
     thinkNext =
       thinkingOn ||
-      toolCalls.some((t) => t.name === "review_design" && t.result.startsWith("DESIGN CRITIQUE:")) ||
-      toolCalls.some((t) => t.result.startsWith("error:")) ||
-      truncated;
+      (recoveryBursts &&
+        (toolCalls.some((t) => t.name === "review_design" && t.result.startsWith("DESIGN CRITIQUE:")) ||
+          toolCalls.some((t) => t.result.startsWith("error:")) ||
+          truncated));
 
     // auto-compact at this consistent boundary (messages[] is balanced here)
     let compacted = false;
-    if (ctxTokens >= COMPACT_TRIGGER && rawToolCalls.length > 0 && i - lastCompactIter >= 2 && compactions < MAX_COMPACTIONS) {
+    if (config.autoCompact !== false && ctxTokens >= COMPACT_TRIGGER && rawToolCalls.length > 0 && i - lastCompactIter >= 2 && compactions < MAX_COMPACTIONS) {
       compacted = await compactContext();
       if (compacted) {
         lastCompactIter = i;
@@ -256,7 +258,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
           ? "You replied with text but called no tool. Do NOT write code or prose in chat — the ONLY way to create the page is to CALL the write_file tool with { path, content }. Respond now with a single tool call."
           : "Continue building with tool calls, or call done if index.html is complete.",
       });
-      if (rambled) thinkNext = true; // one-shot recovery burst even when thinking is off — a model that rambled needs the nudge to emit a real tool call
+      if (rambled && recoveryBursts) thinkNext = true; // one-shot recovery burst (gated by the feature) — a model that rambled needs the nudge to emit a real tool call
     }
   }
 }

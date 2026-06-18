@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { saveStitchKey, saveToolSettings } from "./api.ts";
+import { saveFeatures, saveStitchKey, saveToolSettings, type OxyStatus } from "./api.ts";
 
 const SAFE_TOOLS: Array<{ key: string; label: string; hint: string }> = [
   { key: "web_search", label: "Web search", hint: "let the model search the web (DuckDuckGo)" },
@@ -7,16 +7,47 @@ const SAFE_TOOLS: Array<{ key: string; label: string; hint: string }> = [
   { key: "generate_image", label: "Image generation", hint: "local Stable Diffusion image assets" },
 ];
 
+// The toggleable "improvement" features — flip any off to A/B test it. `def` mirrors the
+// server's DEFAULT_FEATURES so the toggle shows the right state before status loads.
+const FEATURE_CATALOG: Array<{ key: string; def: boolean; label: string; hint: string }> = [
+  { key: "thinking", def: false, label: "Model thinking", hint: "reason each turn before acting — slower, can help hard logic. OFF = straight to building (recommended; gemma4 over-thinks)" },
+  { key: "downscaleImages", def: true, label: "Downscale attached images", hint: "shrink big screenshots before sending — far faster vision prefill on an iGPU" },
+  { key: "idleTimeout", def: true, label: "Idle generate timeout", hint: "abort only after 120s of silence, not a 600s total cap — lets a slow-but-working build finish instead of reboot-looping" },
+  { key: "autoCompact", def: true, label: "Auto-compact context", hint: "checkpoint + reseed a fresh context when it fills, so long builds keep going past the window" },
+  { key: "recoveryBursts", def: true, label: "Recovery reasoning bursts", hint: "think for one turn after an error, a design critique, or rambling — even when thinking is off" },
+  { key: "modelAwareReuse", def: true, label: "Model-aware server reuse", hint: "restart llama-server when you pick a different model, instead of silently keeping the old one" },
+];
+
 export function Settings({
+  status,
   stitchAvailable,
+  engine,
+  onEngineChange,
+  model,
+  setModel,
+  baseUrl,
+  setBaseUrl,
+  useStitch,
+  setUseStitch,
   tools: initialTools,
   terminalMode: initialMode,
+  features: initialFeatures,
   onClose,
   onSaved,
 }: {
+  status: OxyStatus | null;
   stitchAvailable: boolean;
+  engine: string;
+  onEngineChange: (e: string) => void;
+  model: string;
+  setModel: (m: string) => void;
+  baseUrl: string;
+  setBaseUrl: (u: string) => void;
+  useStitch: boolean;
+  setUseStitch: (b: boolean) => void;
   tools?: Record<string, boolean>;
   terminalMode?: string;
+  features?: Record<string, boolean>;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -25,6 +56,9 @@ export function Settings({
   const [msg, setMsg] = useState("");
   const [tools, setTools] = useState<Record<string, boolean>>(initialTools ?? { web_search: true, web_fetch: true, generate_image: true, run_command: false });
   const [mode, setMode] = useState(initialMode ?? "container");
+  const [features, setFeatures] = useState<Record<string, boolean>>(initialFeatures ?? {});
+
+  const ollamaModels = engine === "ollama" ? status?.models ?? [] : [];
 
   async function saveKey() {
     setSaving(true);
@@ -37,7 +71,7 @@ export function Settings({
     } else setMsg("could not save");
   }
 
-  async function persist(nextTools: Record<string, boolean>, nextMode: string) {
+  async function persistTools(nextTools: Record<string, boolean>, nextMode: string) {
     setTools(nextTools);
     setMode(nextMode);
     const r = await saveToolSettings(nextTools, nextMode);
@@ -47,27 +81,90 @@ export function Settings({
       onSaved();
     }
   }
-  const toggleTool = (k: string) => persist({ ...tools, [k]: !tools[k] }, mode);
+  const toggleTool = (k: string) => persistTools({ ...tools, [k]: !tools[k] }, mode);
+
+  async function toggleFeature(f: { key: string; def: boolean }) {
+    const cur = features[f.key] ?? f.def;
+    const next = { ...features, [f.key]: !cur };
+    setFeatures(next);
+    const saved = await saveFeatures(next);
+    if (saved) {
+      setFeatures(saved);
+      onSaved();
+    }
+  }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Settings</h2>
-        <p className="modal-sub">Bring your own keys, and choose which tools the model may use — everything stays on your machine.</p>
+    <div className="settings-page">
+      <div className="settings-inner">
+        <div className="settings-head">
+          <h2>Settings</h2>
+          <button className="btn-ghost" onClick={onClose}>
+            ← Back
+          </button>
+        </div>
+        <p className="modal-sub">Engine, model, and every feature flag live here. The main screen just shows status. Everything stays on your machine.</p>
 
-        <div className="field">
-          <label>Google Stitch API key — optional, for cloud UI design</label>
-          <div className="field-row">
-            <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={stitchAvailable ? "•••••••  (a key is set — type to replace)" : "paste your Stitch API key"} spellCheck={false} />
-            <button className="build-btn" onClick={saveKey} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </button>
+        {/* ---- Engine & model ---- */}
+        <div className="settings-section">
+          <h3>Engine &amp; model</h3>
+          <div className="field">
+            <label>Engine — where inference runs</label>
+            <select className="settings-select" value={engine} onChange={(e) => onEngineChange(e.target.value)}>
+              {status?.engines.ollama && <option value="ollama">ollama</option>}
+              <option value="llama-server">llama-server (managed, GPU via Vulkan)</option>
+              <option value="openai">openai-compatible</option>
+            </select>
+            {status?.recommendReason && <span className="tool-hint">{status.recommendReason}</span>}
           </div>
-          <span className={`field-status ${stitchAvailable ? "ok" : ""}`}>{msg || (stitchAvailable ? "✓ Stitch is configured" : "not configured — the cloud design tool stays hidden")}</span>
+
+          <div className="field">
+            <label>Model{engine === "llama-server" ? " — name, or download from Hugging Face" : ""}</label>
+            {engine === "ollama" ? (
+              ollamaModels.length ? (
+                <select className="settings-select" value={model} onChange={(e) => setModel(e.target.value)}>
+                  {ollamaModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="tool-hint">no Ollama models found — pull one with `ollama pull gemma4:e4b`</span>
+              )
+            ) : engine === "openai" ? (
+              <div className="field-row">
+                <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:8080/v1" spellCheck={false} />
+                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="model id (optional)" spellCheck={false} />
+              </div>
+            ) : (
+              <>
+                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemma4 default · or hf:org/repo:quant" spellCheck={false} />
+                <span className="tool-hint">leave blank for gemma4. Type an HF ref (e.g. hf:ggml-org/gemma-4-E2B-it-GGUF:Q4_K_M) and it downloads + caches on first build.</span>
+              </>
+            )}
+          </div>
         </div>
 
-        <div className="field">
-          <label>Tools the model may use</label>
+        {/* ---- Feature flags ---- */}
+        <div className="settings-section">
+          <h3>Improvement features</h3>
+          <p className="section-note">Each is an improvement we added; flip one OFF to compare builds with and without it. Defaults are the recommended setting.</p>
+          {FEATURE_CATALOG.map((f) => {
+            const on = features[f.key] ?? f.def;
+            return (
+              <label key={f.key} className="tool-row">
+                <input type="checkbox" checked={on} onChange={() => toggleFeature(f)} />
+                <span className="tool-label">{f.label}</span>
+                <span className="tool-hint">{f.hint}</span>
+              </label>
+            );
+          })}
+        </div>
+
+        {/* ---- Tools ---- */}
+        <div className="settings-section">
+          <h3>Tools the model may use</h3>
           {SAFE_TOOLS.map((t) => (
             <label key={t.key} className="tool-row">
               <input type="checkbox" checked={!!tools[t.key]} onChange={() => toggleTool(t.key)} />
@@ -85,7 +182,7 @@ export function Settings({
           {tools.run_command && (
             <div className="tool-warning">
               ⚠ A local model running shell commands is dangerous. Only enable this inside a <b>disposable VM or container</b> (e.g. Kubernetes). Choose how commands run:
-              <select value={mode} onChange={(e) => persist(tools, e.target.value)}>
+              <select value={mode} onChange={(e) => persistTools(tools, e.target.value)}>
                 <option value="container">Sandboxed container (Docker, network-off) — recommended</option>
                 <option value="host">Host (unsafe — only inside a VM/k8s)</option>
               </select>
@@ -95,9 +192,31 @@ export function Settings({
           )}
         </div>
 
+        {/* ---- Cloud design (Stitch) ---- */}
+        <div className="settings-section">
+          <h3>Cloud design (Google Stitch)</h3>
+          <div className="field">
+            <label>Stitch API key — optional, for cloud UI design</label>
+            <div className="field-row">
+              <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={stitchAvailable ? "•••••••  (a key is set — type to replace)" : "paste your Stitch API key"} spellCheck={false} />
+              <button className="build-btn" onClick={saveKey} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <span className={`field-status ${stitchAvailable ? "ok" : ""}`}>{msg || (stitchAvailable ? "✓ Stitch is configured" : "not configured — the cloud design tool stays hidden")}</span>
+          </div>
+          {stitchAvailable && (
+            <label className="tool-row">
+              <input type="checkbox" checked={useStitch} onChange={(e) => setUseStitch(e.target.checked)} />
+              <span className="tool-label">Design with Stitch</span>
+              <span className="tool-hint">use Google Stitch (cloud) to design the page — the prompt is sent to Google</span>
+            </label>
+          )}
+        </div>
+
         <div className="modal-actions">
           <button className="btn-ghost" onClick={onClose}>
-            Close
+            Done
           </button>
         </div>
       </div>
