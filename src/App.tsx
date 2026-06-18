@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react
 import type { AgentStep } from "../agent/types.ts";
 import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
-import { exportUrl, getProjects, getStatus, previewUrl, runBuild, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
+import { exportUrl, getProjects, getStatus, previewUrl, runAsk, runBuild, type AskEvent, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
 const NUM_CTX = 16384; // matches the loop's context budget
 
@@ -85,6 +85,8 @@ export function App() {
   const [baseUrl, setBaseUrl] = useState("http://localhost:8080/v1");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(false);
+  const [mode, setMode] = useState<"build" | "ask">("build"); // build an app vs. one-shot Q&A
+  const [answer, setAnswer] = useState(""); // ask-mode response
 
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selProject, setSelProject] = useState("");
@@ -202,6 +204,44 @@ export function App() {
     }
   }
 
+  // Ask mode: one-shot Q&A (no build/tools/project) — attach/paste an image + a question
+  async function ask() {
+    if (building || !task.trim()) return;
+    setBuilding(true);
+    setError("");
+    setAnswer("");
+    setStatusMsg("thinking…");
+    setLiveTokens(0);
+    genStartRef.current = Date.now();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      await runAsk(
+        { task: task.trim(), engine, model: model || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        (e: AskEvent) => {
+          if (e.type === "status") setStatusMsg(e.message);
+          else if (e.type === "delta") {
+            setStatusMsg("");
+            setAnswer((a) => a + e.text);
+          } else if (e.type === "progress") setLiveTokens(e.tokens);
+          else if (e.type === "answer") {
+            setStatusMsg("");
+            setAnswer(e.text);
+          } else if (e.type === "error") setError(e.message);
+        },
+        ac.signal,
+      );
+    } catch (err: any) {
+      if (!ac.signal.aborted) setError(String(err?.message ?? err));
+    } finally {
+      setBuilding(false);
+      setStatusMsg("");
+      abortRef.current = null;
+    }
+  }
+
+  const submit = () => (mode === "ask" ? ask() : build());
+
   const stop = () => {
     abortRef.current?.abort();
     setBuilding(false);
@@ -271,12 +311,16 @@ export function App() {
 
         <section className="prompt">
           <div className="prompt-main">
+          <div className="mode-toggle">
+            <button type="button" className={mode === "build" ? "on" : ""} onClick={() => setMode("build")}>Build</button>
+            <button type="button" className={mode === "ask" ? "on" : ""} onClick={() => setMode("ask")}>Ask</button>
+          </div>
           <textarea
             value={task}
             onChange={(e) => setTask(e.target.value)}
-            placeholder={iterating ? "Describe a change or addition…" : "Describe the app you want to build…"}
+            placeholder={mode === "ask" ? "Ask about an attached image, or anything…" : iterating ? "Describe a change or addition…" : "Describe the app you want to build…"}
             onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build();
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
             }}
             onPaste={onPaste}
           />
@@ -301,12 +345,12 @@ export function App() {
               Stop
             </button>
           ) : (
-            <button className="build-btn" onClick={build} disabled={!task.trim()}>
-              {iterating ? "Update" : "Build"}
+            <button className="build-btn" onClick={submit} disabled={!task.trim()}>
+              {mode === "ask" ? "Ask" : iterating ? "Update" : "Build"}
             </button>
           )}
         </section>
-        <p className="helper">{iterating ? "iterating — Oxy reads the current files and edits in place" : "⌘/Ctrl + Enter to build"}</p>
+        <p className="helper">{mode === "ask" ? "⌘/Ctrl + Enter to ask — attach or paste an image" : iterating ? "iterating — Oxy reads the current files and edits in place" : "⌘/Ctrl + Enter to build"}</p>
 
         <section className="status-row">
           <div className="pill" title="active engine and model">
@@ -358,7 +402,7 @@ export function App() {
 
         {error && <div className="banner error">{error}</div>}
 
-        {(steps.length > 0 || building) && (
+        {mode === "build" && (steps.length > 0 || building) && (
           <section>
             <p className="section-title">Build progress</p>
             {statusMsg && steps.length === 0 && (
@@ -400,6 +444,17 @@ export function App() {
           </section>
         )}
 
+        {mode === "ask" && (answer || building) && (
+          <section>
+            <p className="section-title">Answer</p>
+            <div className="answer-card">
+              {answer ? <div className="answer-text">{answer}</div> : <div className="answer-text muted">{statusMsg || "…"}</div>}
+              {building && liveLabel && <div className="answer-live">{liveLabel}</div>}
+            </div>
+          </section>
+        )}
+
+        {mode === "build" && (
         <section className="preview">
           <div className="browser-bar">
             <div className="dots">
@@ -429,6 +484,7 @@ export function App() {
             )}
           </div>
         </section>
+        )}
       </div>
 
       {showSettings && (

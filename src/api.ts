@@ -27,6 +27,15 @@ export type BuildEvent =
   | { type: "done"; project: string }
   | { type: "error"; message: string };
 
+/** Events from the one-shot /ask (no build) endpoint. */
+export type AskEvent =
+  | { type: "status"; message: string }
+  | { type: "delta"; text: string }
+  | { type: "progress"; iteration: number; tokens: number }
+  | { type: "answer"; text: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
@@ -90,15 +99,10 @@ export interface BuildRequest {
   attachments?: Attachment[];
 }
 
-/** POST a build and stream NDJSON events back as they happen. */
-export async function runBuild(body: BuildRequest, onEvent: (e: BuildEvent) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch("/oxy/api/build", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok || !res.body) throw new Error(`build request failed (HTTP ${res.status})`);
+// POST a body and stream NDJSON events back as they happen (shared by build + ask).
+async function streamNdjson(url: string, body: unknown, onEvent: (e: any) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+  if (!res.ok || !res.body) throw new Error(`request failed (HTTP ${res.status})`);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -111,7 +115,7 @@ export async function runBuild(body: BuildRequest, onEvent: (e: BuildEvent) => v
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        onEvent(JSON.parse(line) as BuildEvent);
+        onEvent(JSON.parse(line));
       } catch {
         /* skip malformed */
       }
@@ -119,11 +123,21 @@ export async function runBuild(body: BuildRequest, onEvent: (e: BuildEvent) => v
   }
   if (buf.trim()) {
     try {
-      onEvent(JSON.parse(buf) as BuildEvent);
+      onEvent(JSON.parse(buf));
     } catch {
       /* ignore */
     }
   }
+}
+
+/** POST a build and stream NDJSON events back as they happen. */
+export function runBuild(body: BuildRequest, onEvent: (e: BuildEvent) => void, signal?: AbortSignal): Promise<void> {
+  return streamNdjson("/oxy/api/build", body, onEvent as (e: unknown) => void, signal);
+}
+
+/** One-shot Q&A (no build): attach/paste an image + a question → the model's answer, streamed. */
+export function runAsk(body: BuildRequest, onEvent: (e: AskEvent) => void, signal?: AbortSignal): Promise<void> {
+  return streamNdjson("/oxy/api/ask", body, onEvent as (e: unknown) => void, signal);
 }
 
 export const previewUrl = (project: string) => `/codelab/preview/${project}/`;

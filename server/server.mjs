@@ -452,6 +452,24 @@ export async function stitchGenerate(prompt, opts = {}) {
   }
 }
 
+// Construct an Engine from a request body (shared by /build and /ask).
+async function engineFromBody(body) {
+  if (body.engine === "openai") {
+    const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
+    return new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
+  }
+  if (body.engine === "llama-server") {
+    const { LlamaServerEngine } = await import("../engine/llama-server.ts");
+    return new LlamaServerEngine({ modelRef: body.model || undefined });
+  }
+  if (body.engine === "litert-lm") {
+    const { LiteRtLmEngine } = await import("../engine/litert-lm.ts");
+    return new LiteRtLmEngine({ model: body.model || undefined });
+  }
+  const { OllamaEngine } = await import("../engine/ollama.ts");
+  return new OllamaEngine({ model: body.model });
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -581,21 +599,7 @@ export async function codelabHandler(req, res, next) {
       try {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
-        let engine;
-        if (body.engine === "openai") {
-          const { OpenAICompatEngine } = await import("../engine/openai-compat.ts");
-          engine = new OpenAICompatEngine({ baseUrl: body.baseUrl, model: body.model, apiKey: body.apiKey });
-        } else if (body.engine === "llama-server") {
-          const { LlamaServerEngine } = await import("../engine/llama-server.ts");
-          engine = new LlamaServerEngine({ modelRef: body.model || undefined });
-        } else if (body.engine === "litert-lm") {
-          // Google AI Edge runtime — decodes gemma4 vision/audio (llama.cpp doesn't yet)
-          const { LiteRtLmEngine } = await import("../engine/litert-lm.ts");
-          engine = new LiteRtLmEngine({ model: body.model || undefined });
-        } else {
-          const { OllamaEngine } = await import("../engine/ollama.ts");
-          engine = new OllamaEngine({ model: body.model });
-        }
+        const engine = await engineFromBody(body);
         send({ type: "status", message: "preparing engine…" });
         await engine.ensureReady();
         const baseUrl = `http://${req.headers.host}`;
@@ -664,6 +668,60 @@ export async function codelabHandler(req, res, next) {
             }
           })();
         }
+      } catch (e) {
+        send({ type: "error", message: String(e?.message ?? e) });
+      } finally {
+        res.end();
+      }
+      return;
+    }
+
+    // ---- Oxy: ASK — one-shot multimodal Q&A (no build, no tools, no project),
+    // streamed. Far lighter than a build; for "what's in this image?" etc. ----
+    if (pathPart === "/oxy/api/ask" && req.method === "POST") {
+      const body = await readBody(req);
+      const task = body.task;
+      if (typeof task !== "string" || !task.trim()) return sendJson(res, 200, { ok: false, error: "question required" });
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Cache-Control", "no-store");
+      const send = (obj) => {
+        try {
+          res.write(JSON.stringify(obj) + "\n");
+        } catch {
+          /* client gone */
+        }
+      };
+      const ac = new AbortController();
+      req.on("close", () => ac.abort());
+      try {
+        const engine = await engineFromBody(body);
+        send({ type: "status", message: "thinking…" });
+        await engine.ensureReady();
+        const attachments = Array.isArray(body.attachments)
+          ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
+          : undefined;
+        let answer = "";
+        let lastLen = 0;
+        const result = await engine.generate(
+          [{ role: "user", content: task, attachments: attachments && attachments.length ? attachments : undefined }],
+          [],
+          {
+            temperature: Number(body.temperature) || 0.4,
+            numPredict: Number(body.numPredict) || 1024,
+            signal: ac.signal,
+            onToken: (t) => {
+              answer += t;
+              send({ type: "delta", text: t });
+              if (answer.length - lastLen >= 24) {
+                lastLen = answer.length;
+                send({ type: "progress", iteration: 0, tokens: answer.length });
+              }
+            },
+          },
+        );
+        send({ type: "answer", text: result.content || answer });
+        send({ type: "done" });
       } catch (e) {
         send({ type: "error", message: String(e?.message ?? e) });
       } finally {
