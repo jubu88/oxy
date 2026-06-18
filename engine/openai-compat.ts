@@ -145,7 +145,15 @@ export class OpenAICompatEngine implements Engine {
         const idx = tc.index ?? 0;
         const cur = toolFrags.get(idx) ?? { name: "", args: "" };
         if (tc.function?.name) cur.name = tc.function.name;
-        if (tc.function?.arguments) cur.args += tc.function.arguments;
+        if (tc.function?.arguments) {
+          cur.args += tc.function.arguments;
+          // A build's main output (write_file's file content) streams as TOOL-CALL
+          // argument fragments, NOT as delta.content — so without ticking progress
+          // here the live token meter reads 0 for minutes during the biggest part of
+          // every build and looks hung. Count tool-call streaming as progress too.
+          // (loop.ts uses the chunk only to count tokens; its liveText is dropped.)
+          if (!opts.signal?.aborted) opts.onToken?.(tc.function.arguments);
+        }
         toolFrags.set(idx, cur);
       }
     };
