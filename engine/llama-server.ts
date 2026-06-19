@@ -28,8 +28,11 @@ function modelArgs(ref: string): string[] {
 
 const execFileP = promisify(execFile);
 
-// gemma4 by default — the capable, latest model the user asked for. Override with OXY_MODEL.
-const DEFAULT_MODEL = "hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M";
+// gemma4 E2B by default — the smaller sibling: ~2× faster decode and a much smaller
+// footprint than E4B, which matters a lot on a memory-tight 16GB iGPU machine (E4B
+// swaps and crawls to ~6 tok/s; E2B fits and stays fast). E4B is more capable — pick it
+// in Settings (hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M) for harder apps. Override: OXY_MODEL.
+const DEFAULT_MODEL = "hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M";
 const CACHE_ROOT = path.join(os.homedir(), ".oxy", "llama-server");
 const RELEASES_API = "https://github.com/ggml-org/llama.cpp/releases/latest";
 const RELEASES_JSON = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
