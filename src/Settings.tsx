@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { saveFeatures, saveStitchKey, saveToolSettings, type OxyStatus } from "./api.ts";
+import { checkModel, saveFeatures, saveModels, saveStitchKey, saveToolSettings, type OxyStatus } from "./api.ts";
+
+const modelLabel = (ref: string) => ref.replace(/^hf:/, "");
 
 const SAFE_TOOLS: Array<{ key: string; label: string; hint: string }> = [
   { key: "web_search", label: "Web search", hint: "let the model search the web (DuckDuckGo)" },
@@ -57,8 +59,35 @@ export function Settings({
   const [tools, setTools] = useState<Record<string, boolean>>(initialTools ?? { web_search: true, web_fetch: true, generate_image: true, run_command: false });
   const [mode, setMode] = useState(initialMode ?? "container");
   const [features, setFeatures] = useState<Record<string, boolean>>(initialFeatures ?? {});
+  const [llamaModels, setLlamaModels] = useState<string[]>(status?.llamaModels ?? []);
+  const [hfInput, setHfInput] = useState("");
+  const [hfMsg, setHfMsg] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const ollamaModels = engine === "ollama" ? status?.models ?? [] : [];
+
+  // Add a Hugging Face model: validate it exists (+ has the quant) then save it to the picker.
+  async function addHfModel() {
+    const raw = hfInput.trim();
+    if (!raw) return;
+    const ref = raw.startsWith("hf:") || /^https?:\/\//i.test(raw) || raw.includes("\\") ? raw : `hf:${raw}`;
+    setAdding(true);
+    setHfMsg("checking Hugging Face…");
+    const res = await checkModel(ref);
+    setAdding(false);
+    if (!res.ok) {
+      setHfMsg("✗ " + (res.error || "not found"));
+      return;
+    }
+    const saved = await saveModels([...new Set([...llamaModels, ref])]);
+    if (saved) {
+      setLlamaModels(saved);
+      setModel(ref);
+      setHfInput("");
+      setHfMsg(`✓ added — downloads automatically on first build${res.note ? ` (${res.note})` : ""}`);
+      onSaved();
+    } else setHfMsg("✗ could not save");
+  }
 
   async function saveKey() {
     setSaving(true);
@@ -139,8 +168,31 @@ export function Settings({
               </div>
             ) : (
               <>
-                <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemma4 default · or hf:org/repo:quant" spellCheck={false} />
-                <span className="tool-hint">leave blank for gemma4. Type an HF ref (e.g. hf:ggml-org/gemma-4-E2B-it-GGUF:Q4_K_M) and it downloads + caches on first build.</span>
+                <select className="settings-select" value={model || llamaModels[0] || ""} onChange={(e) => setModel(e.target.value)}>
+                  {llamaModels.map((m, i) => (
+                    <option key={m} value={m}>
+                      {modelLabel(m)}
+                      {i === 0 ? "  (default)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="field-row" style={{ marginTop: 8 }}>
+                  <input
+                    value={hfInput}
+                    onChange={(e) => setHfInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addHfModel();
+                    }}
+                    placeholder="Hugging Face: org/repo:Quant — e.g. unsloth/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M"
+                    spellCheck={false}
+                  />
+                  <button className="build-btn" onClick={addHfModel} disabled={adding || !hfInput.trim()}>
+                    {adding ? "Checking…" : "Add"}
+                  </button>
+                </div>
+                <span className={`tool-hint ${hfMsg.startsWith("✗") ? "danger-text" : ""}`}>
+                  {hfMsg || "Pick a saved model, or add any GGUF from Hugging Face — it validates the repo, then downloads on first build (one-time)."}
+                </span>
               </>
             )}
           </div>

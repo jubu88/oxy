@@ -68,16 +68,23 @@ const DEFAULT_FEATURES = {
   modelAwareReuse: true, //   restart llama-server when a different model is selected
 };
 const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES);
+// Saved llama-server model refs shown in the Settings picker (the user can add any HF
+// GGUF). Seeded with the two gemma4 options; the default (e2b) is first.
+const DEFAULT_MODELS = ["hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M", "hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M"];
+const sanitizeModels = (arr) =>
+  Array.isArray(arr) ? [...new Set(arr.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim()))].slice(0, 40) : null;
 function readSettings() {
   try {
     const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+    const saved = sanitizeModels(s.llamaModels);
     return {
       tools: { ...DEFAULT_TOOLS, ...(s.tools || {}) },
       terminalMode: ["container", "host", "disabled"].includes(s.terminalMode) ? s.terminalMode : "container",
       features: { ...DEFAULT_FEATURES, ...(s.features || {}) },
+      llamaModels: [...new Set([...DEFAULT_MODELS, ...(saved || [])])],
     };
   } catch {
-    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container", features: { ...DEFAULT_FEATURES } };
+    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container", features: { ...DEFAULT_FEATURES }, llamaModels: [...DEFAULT_MODELS] };
   }
 }
 function writeSettings(next) {
@@ -87,7 +94,9 @@ function writeSettings(next) {
   const terminalMode = ["container", "host", "disabled"].includes(next.terminalMode) ? next.terminalMode : cur.terminalMode;
   const features = { ...cur.features };
   if (next.features && typeof next.features === "object") for (const k of FEATURE_KEYS) if (typeof next.features[k] === "boolean") features[k] = next.features[k];
-  const merged = { tools, terminalMode, features };
+  const incoming = sanitizeModels(next.llamaModels);
+  const llamaModels = [...new Set([...DEFAULT_MODELS, ...(incoming || cur.llamaModels)])];
+  const merged = { tools, terminalMode, features, llamaModels };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), "utf8");
   return merged;
 }
@@ -550,6 +559,7 @@ export async function codelabHandler(req, res, next) {
         tools: settings.tools,
         terminalMode: settings.terminalMode,
         features: settings.features,
+        llamaModels: settings.llamaModels,
       });
     }
 
@@ -564,10 +574,41 @@ export async function codelabHandler(req, res, next) {
           else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
         }
         let settings = readSettings();
-        if (body.tools || body.terminalMode || body.features) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode, features: body.features });
-        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode, features: settings.features });
+        if (body.tools || body.terminalMode || body.features || body.llamaModels) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode, features: body.features, llamaModels: body.llamaModels });
+        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode, features: settings.features, llamaModels: settings.llamaModels });
       } catch (e) {
         return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
+      }
+    }
+
+    // ---- Oxy: validate a Hugging Face model ref before adding it (catch typos in ~1s
+    // instead of a 900s boot hang). Checks the repo exists and has a GGUF of that quant. ----
+    if (pathPart === "/oxy/api/model/check" && req.method === "POST") {
+      const body = await readBody(req);
+      let ref = String(body.ref || "").trim().replace(/^hf:/, "");
+      // local path / URL — can't validate via HF, accept as-is
+      if (!ref) return sendJson(res, 200, { ok: false, error: "enter a model ref" });
+      if (/^https?:\/\//i.test(ref) || ref.includes("\\") || ref.split("/").length > 2) {
+        return sendJson(res, 200, { ok: true, note: "non-HF ref — used as-is, not validated" });
+      }
+      const m = ref.match(/^([^/:]+\/[^/:]+)(?::(.+))?$/);
+      if (!m) return sendJson(res, 200, { ok: false, error: "expected org/repo:Quant (e.g. unsloth/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M)" });
+      const repo = m[1];
+      const quant = m[2];
+      try {
+        const r = await fetch(`https://huggingface.co/api/models/${repo}`, { headers: { "User-Agent": "oxy" }, signal: AbortSignal.timeout(10000) });
+        if (r.status === 404 || r.status === 401) return sendJson(res, 200, { ok: false, error: `repo not found (or private) on Hugging Face: ${repo}` });
+        if (!r.ok) return sendJson(res, 200, { ok: false, error: `Hugging Face check failed (HTTP ${r.status})` });
+        const j = await r.json();
+        const ggufs = (j.siblings || []).map((s) => s.rfilename || "").filter((f) => f.toLowerCase().endsWith(".gguf"));
+        if (!ggufs.length) return sendJson(res, 200, { ok: false, error: `${repo} has no GGUF files (llama-server needs GGUF)` });
+        if (quant && !ggufs.some((f) => f.toLowerCase().includes(quant.toLowerCase()))) {
+          const quants = [...new Set(ggufs.map((f) => (f.match(/(UD-)?(Q\d[0-9A-Z_]*|BF16|F16|F32)/i) || [, , ""])[2]).filter(Boolean))];
+          return sendJson(res, 200, { ok: false, error: `quant "${quant}" not in ${repo}. Available: ${quants.slice(0, 8).join(", ")}` });
+        }
+        return sendJson(res, 200, { ok: true });
+      } catch (e) {
+        return sendJson(res, 200, { ok: false, error: `Hugging Face check failed: ${String(e?.message ?? e).slice(0, 120)}` });
       }
     }
 
