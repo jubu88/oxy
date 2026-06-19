@@ -8,7 +8,7 @@
 // `get_design_system` and `done` are pure-local (no backend round-trip). The
 // loop depends only on the ToolExecutor interface (types.ts), so tests inject a
 // fake and the real engine never has to be running.
-import type { ProjectInfo, ToolContext, ToolExecutor } from "./types.ts";
+import type { ProjectInfo, ToolContext, ToolExecutor, ToolResult } from "./types.ts";
 import { DESIGN_SYSTEMS } from "./design-systems.ts";
 
 const DEFAULT_BASE = "http://localhost:5173";
@@ -33,7 +33,7 @@ export class HttpToolExecutor implements ToolExecutor {
     this.api = apiBase(opts.baseUrl ?? DEFAULT_BASE);
   }
 
-  async call(name: string, args: any, ctx: ToolContext): Promise<string> {
+  async call(name: string, args: any, ctx: ToolContext): Promise<string | ToolResult> {
     const api = this.api;
     const project = ctx.project;
     try {
@@ -77,6 +77,21 @@ export class HttpToolExecutor implements ToolExecutor {
       if (name === "review_design") {
         const r = await (await fetch(`${api}/review`, post({ project }))).json();
         return r.ok ? `DESIGN CRITIQUE:\n${r.critique}` : `error: ${r.error}`;
+      }
+      if (name === "check_app") {
+        const r = await (await fetch(`${api}/check-app`, post({ project, actions: args.actions }))).json();
+        if (!r.ok) return `error: ${r.error}`;
+        const errs: string[] = r.consoleErrors ?? [];
+        const log: string[] = r.log ?? [];
+        const text =
+          "PAGE CHECK:\n" +
+          (log.length ? "actions:\n" + log.join("\n") : "(no interactions — screenshot + console check only)") +
+          "\n\n" +
+          (errs.length ? `⚠ JavaScript console errors (${errs.length}) — FIX THESE:\n` + errs.slice(0, 8).join("\n") : "console errors: none ✓") +
+          "\n\nvisible text now:\n" +
+          (r.visibleText || "(page has no visible text)") +
+          "\n\nA screenshot is attached — look at it to confirm the layout looks right and the interaction worked.";
+        return r.screenshotB64 ? { text, image: { kind: "image", mime: "image/png", data: r.screenshotB64 } } : text;
       }
       if (name === "design_with_stitch") {
         const r = await (

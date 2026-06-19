@@ -504,6 +504,86 @@ async function reviewDesign(project, modelOverride) {
   return { critique: data.message?.content ?? "", screenshotBytes: shot.length };
 }
 
+// Resolve an interaction target to a Playwright locator: try CSS selector, then a
+// button by accessible name, then any visible text, then a placeholder/label.
+async function resolveLocator(page, target) {
+  if (!target) return null;
+  const tries = [
+    () => page.locator(target).first(),
+    () => page.getByRole("button", { name: target }).first(),
+    () => page.getByText(target, { exact: false }).first(),
+    () => page.getByPlaceholder(target).first(),
+    () => page.getByLabel(target).first(),
+  ];
+  for (const t of tries) {
+    try {
+      const l = t();
+      if (await l.count()) return l;
+    } catch {
+      /* invalid selector etc. — try the next strategy */
+    }
+  }
+  return null;
+}
+
+// Render index.html in a real (sandboxed, file://) browser, optionally perform a
+// sequence of click/type interactions, and report what ACTUALLY happened: JS console
+// errors, a per-action success/fail log, the resulting visible text, and a screenshot.
+// This is how the model verifies its app works (not just looks right).
+async function checkApp(project, actions = []) {
+  const indexPath = safePath(project, "index.html");
+  if (!fs.existsSync(indexPath)) throw new Error("no index.html to check");
+  let chromium;
+  try {
+    ({ chromium } = await import("playwright"));
+  } catch {
+    throw new Error("page check unavailable (playwright not installed)");
+  }
+  if (!sharedBrowser || !sharedBrowser.isConnected()) sharedBrowser = await chromium.launch({ headless: true });
+  const ctx = await sharedBrowser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 0.6 });
+  const page = await ctx.newPage();
+  const consoleErrors = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200));
+  });
+  page.on("pageerror", (e) => consoleErrors.push("pageerror: " + String(e?.message ?? e).slice(0, 200)));
+  const log = [];
+  try {
+    await page.goto(pathToFileURL(indexPath).href, { waitUntil: "networkidle", timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+    for (const a of Array.isArray(actions) ? actions.slice(0, 12) : []) {
+      const op = String(a.do || a.action || "").toLowerCase();
+      const target = String(a.target || a.on || a.selector || "");
+      const value = a.value ?? a.text ?? "";
+      try {
+        const loc = await resolveLocator(page, target);
+        if (!loc) {
+          log.push(`✗ ${op || "click"} "${target}": element not found`);
+          continue;
+        }
+        if (op === "type" || op === "fill" || op === "input") {
+          await loc.fill(String(value), { timeout: 4000 });
+          log.push(`✓ typed "${value}" into "${target}"`);
+        } else {
+          await loc.click({ timeout: 4000 });
+          log.push(`✓ clicked "${target}"`);
+        }
+        await page.waitForTimeout(250);
+      } catch (e) {
+        log.push(`✗ ${op || "click"} "${target}": ${String(e?.message ?? e).split("\n")[0].slice(0, 110)}`);
+      }
+    }
+    const visibleText = (await page.evaluate(() => (document.body && document.body.innerText) || "").catch(() => ""))
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 1500);
+    const shot = await page.screenshot({ fullPage: false, type: "png" });
+    return { log, consoleErrors, visibleText, screenshotB64: shot.toString("base64") };
+  } finally {
+    await ctx.close();
+  }
+}
+
 // minimal MCP client for the (stateless) Stitch server: one POST per call with
 // the API-key header. Parses plain JSON or SSE-wrapped JSON ("data: {…}").
 async function stitchMcp(method, params, timeoutMs = STITCH_TIMEOUT_MS) {
@@ -1060,6 +1140,14 @@ export async function codelabHandler(req, res, next) {
     if (pathPart === "/codelab/api/review" && req.method === "POST") {
       const { project, model } = await readBody(req);
       return sendJson(res, 200, { ok: true, ...(await reviewDesign(project, model)) });
+    }
+    if (pathPart === "/codelab/api/check-app" && req.method === "POST") {
+      const { project, actions } = await readBody(req);
+      try {
+        return sendJson(res, 200, { ok: true, ...(await checkApp(project, actions)) });
+      } catch (e) {
+        return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
+      }
     }
     if (pathPart === "/codelab/api/stitch-status" && req.method === "GET") {
       return sendJson(res, 200, { available: !!stitchApiKey(), busy: stitchBusy });

@@ -122,6 +122,30 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: {} },
   },
   {
+    name: "check_app",
+    description:
+      "Verify your app ACTUALLY WORKS: opens the current index.html in a real browser, optionally performs interactions, then returns any JavaScript console errors, a per-step pass/fail log, the page's visible text afterward, AND a screenshot you can look at. Use it before done to confirm interactions function (e.g. click a button and check the result appears). `actions` is an ordered list, each {\"do\":\"click\"|\"type\",\"target\":\"<visible button/link text or CSS selector>\",\"value\":\"<text to type>\"}. Example: [{\"do\":\"type\",\"target\":\"#new-task\",\"value\":\"Buy milk\"},{\"do\":\"click\",\"target\":\"Add\"}]. Pass no actions to just screenshot + check for console errors.",
+    parameters: {
+      type: "object",
+      properties: {
+        actions: {
+          type: "array",
+          description: "ordered interactions to perform before checking (optional)",
+          items: {
+            type: "object",
+            properties: {
+              do: { type: "string", description: "click or type" },
+              target: { type: "string", description: "visible text or a CSS selector" },
+              value: { type: "string", description: "text to type (for do=type)" },
+            },
+            required: ["do", "target"],
+          },
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: "run_command",
     description:
       "Run a shell command in the project's sandboxed working directory and return its (truncated) output. Use for build steps, running tests, or inspecting files. Runs in an isolated, network-less container (or a gated host environment). Keep commands short and non-interactive; destructive commands are refused.",

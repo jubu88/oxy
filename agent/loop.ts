@@ -52,7 +52,8 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   if (config.iterate) {
     let files: FileEntry[] = [];
     try {
-      files = (JSON.parse(await executor.call("list_files", {}, ctx)) as FileEntry[]).filter((f) => !String(f.path).startsWith(".codelab"));
+      const listed = await executor.call("list_files", {}, ctx);
+      files = (JSON.parse(typeof listed === "string" ? listed : listed.text) as FileEntry[]).filter((f) => !String(f.path).startsWith(".codelab"));
     } catch {
       /* none yet */
     }
@@ -99,7 +100,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     let files: FileEntry[] = [];
     try {
       const listed = await executor.call("list_files", {}, ctx);
-      files = (JSON.parse(listed) as FileEntry[]).filter((f) => !String(f.path).startsWith(".codelab"));
+      files = (JSON.parse(typeof listed === "string" ? listed : listed.text) as FileEntry[]).filter((f) => !String(f.path).startsWith(".codelab"));
     } catch {
       /* seed still carries goal + toolLog */
     }
@@ -183,7 +184,9 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     for (const tc of rawToolCalls) {
       const name = tc.name;
       const args = typeof tc.arguments === "string" ? safeParse(tc.arguments) : tc.arguments ?? {};
-      const result = await executor.call(name, args, ctx);
+      const raw = await executor.call(name, args, ctx);
+      const result = typeof raw === "string" ? raw : raw.text; // a tool may return {text, image}
+      const image = typeof raw === "string" ? undefined : raw.image;
       toolCalls.push({ name, args, result });
       // accumulate deterministic state for a possible compaction (ground truth, no extra model call)
       toolLog.push(`${name} ${args.path || args.style || args.name || ""}`.trim());
@@ -194,6 +197,17 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
       const limit = name === "read_file" ? 16000 : 4000;
       turnToolChars += Math.min(result.length, limit);
       messages.push({ role: "tool", tool_name: name, content: result.slice(0, limit) });
+      // a tool that produced an image (check_app's screenshot) — surface it to the model
+      // as a USER turn so it can actually SEE its app (tool messages can't carry images in
+      // the OpenAI/Ollama shape). Dropped on the next compaction; that's fine.
+      if (image) {
+        messages.push({
+          role: "user",
+          content: "Screenshot of your app's current state — confirm it looks right and the interaction worked; then fix with edit_file or call done.",
+          attachments: [image],
+        });
+        turnToolChars += 900; // rough image prefill budget
+      }
     }
 
     const isDone = toolCalls.some((t) => t.name === "done");

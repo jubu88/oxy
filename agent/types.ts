@@ -107,14 +107,22 @@ export interface ToolContext {
   project: string;
 }
 
+/** A richer tool result: the text the model reads, plus an optional image it SEES
+ *  (e.g. a screenshot from check_app) — the loop appends the image as a user turn. */
+export interface ToolResult {
+  text: string;
+  image?: Attachment;
+}
+
 /**
  * Executes a model-requested tool and returns the short string result the model
- * sees next turn. The default implementation talks to the jailed /codelab
- * backend over HTTP, but the loop only depends on this interface, so tests (and
- * future transports) can swap it freely.
+ * sees next turn (or a {text, image} result for tools that produce a screenshot).
+ * The default implementation talks to the jailed /codelab backend over HTTP, but
+ * the loop only depends on this interface, so tests (and future transports) can
+ * swap it freely.
  */
 export interface ToolExecutor {
-  call(name: string, args: any, ctx: ToolContext): Promise<string>;
+  call(name: string, args: any, ctx: ToolContext): Promise<string | ToolResult>;
 }
 
 /**
