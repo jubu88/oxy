@@ -80,7 +80,7 @@ const projectLabel = (id: string) => id.replace(/-\d{8,}$/, "").replace(/-/g, " 
 // Remember the user's engine/model choice across reloads, so a page refresh doesn't
 // snap them back to the auto-recommended engine (the "I picked ollama but it used
 // llama-server" surprise). Falls back to {} on any storage/parse error.
-function loadPrefs(): { engine?: string; model?: string; baseUrl?: string; useStitch?: boolean } {
+function loadPrefs(): { engine?: string; model?: string; baseUrl?: string; useStitch?: boolean; design?: string } {
   try {
     return JSON.parse(localStorage.getItem("oxy.prefs") || "{}") || {};
   } catch {
@@ -151,6 +151,7 @@ export function App() {
   const [baseUrl, setBaseUrl] = useState(() => loadPrefs().baseUrl || "http://localhost:8080/v1");
   const [task, setTask] = useState("");
   const [useStitch, setUseStitch] = useState(() => !!loadPrefs().useStitch);
+  const [designStyle, setDesignStyle] = useState(() => loadPrefs().design || ""); // "" = auto (model picks)
   const [mode, setMode] = useState<"build" | "ask">("build"); // build an app vs. one-shot Q&A
   const [answer, setAnswer] = useState(""); // ask-mode response
 
@@ -196,11 +197,11 @@ export function App() {
   // persist the engine/model choice so a reload keeps it (no snap-back to the default)
   useEffect(() => {
     try {
-      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl, useStitch }));
+      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl, useStitch, design: designStyle }));
     } catch {
       /* storage unavailable — non-fatal */
     }
-  }, [engine, model, baseUrl, useStitch]);
+  }, [engine, model, baseUrl, useStitch, designStyle]);
 
   // 1-second heartbeat so the live "generating…" elapsed timer ticks while building
   useEffect(() => {
@@ -273,7 +274,7 @@ export function App() {
     let builtId = selProject || "";
     try {
       await runBuild(
-        { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
+        { task: task.trim(), engine, model: model || undefined, useStitch, design: designStyle || undefined, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: BuildEvent) => {
           if (e.type === "status") {
             // a new phase begins — record the previous active row as a phase, then switch
@@ -464,6 +465,21 @@ export function App() {
           )}
         </section>
         <p className="helper">{mode === "ask" ? "⌘/Ctrl + Enter to ask — attach or paste an image" : iterating ? "iterating — Oxy reads the current files and edits in place" : "⌘/Ctrl + Enter to build"}</p>
+
+        {mode === "build" && (
+          <div className="design-row" title="pick a visual style, or let the model choose">
+            <span className="material-symbols-outlined">palette</span>
+            <span className="design-label">design</span>
+            <select className="design-select" value={designStyle} onChange={(e) => setDesignStyle(e.target.value)}>
+              <option value="">Auto (model picks)</option>
+              {(status?.designSystems ?? []).map((d) => (
+                <option key={d.key} value={d.key}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <section className="status-row">
           <button className="pill info-pill" title="active engine and model — click to change in Settings" onClick={() => setShowSettings(true)}>

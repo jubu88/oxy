@@ -194,6 +194,22 @@ async function hfDownloadBytes(repo, quant) {
   }
 }
 
+// design systems available to the picker (key + friendly label), loaded once
+let _designSystems = null;
+async function designSystemsList() {
+  if (_designSystems) return _designSystems;
+  try {
+    const { DESIGN_SYSTEMS } = await import("../agent/design-systems.ts");
+    _designSystems = Object.entries(DESIGN_SYSTEMS).map(([key, v]) => ({
+      key,
+      label: (String(v).match(/Style:\s*([^—\n]+)/)?.[1] || key).trim(),
+    }));
+  } catch {
+    _designSystems = [];
+  }
+  return _designSystems;
+}
+
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_FILES = 80;
 const MAX_FETCH_BYTES = 200 * 1024;
@@ -733,6 +749,7 @@ export async function codelabHandler(req, res, next) {
         terminalMode: settings.terminalMode,
         features: settings.features,
         llamaModels: settings.llamaModels,
+        designSystems: await designSystemsList(),
       });
     }
 
@@ -929,6 +946,7 @@ export async function codelabHandler(req, res, next) {
             maxIterations: Number(body.maxIterations) || 14,
             temperature: Number(body.temperature) || 0.6,
             useStitch: !!body.useStitch,
+            designStyle: typeof body.design === "string" ? body.design : "",
             iterate,
             systemOverride,
             attachments: attachments && attachments.length ? attachments : undefined,

@@ -58,6 +58,10 @@ export interface AgentConfig {
   consoleErrors?: string[];
   /** offer the cloud design_with_stitch tool (off = fully local) */
   useStitch?: boolean;
+  /** a design system the USER pre-picked (a key in DESIGN_SYSTEMS). When set, the loop
+   *  injects its CSS up front and the model uses it directly (skipping get_design_system).
+   *  Empty/unset ⇒ the model chooses the style itself. */
+  designStyle?: string;
   /**
    * Continue/modify an EXISTING project rather than building from scratch: the
    * loop seeds the model with the current file list and frames `task` as a change

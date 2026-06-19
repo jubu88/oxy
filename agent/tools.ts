@@ -5,6 +5,9 @@
 // its backend wants (node-llama-cpp function defs, Ollama's
 // {type:"function",function:{…}} shape, etc.) — the agent core stays neutral.
 import type { ToolDef } from "../engine/engine.ts";
+import { DESIGN_SYSTEMS } from "./design-systems.ts";
+
+const STYLE_KEYS = Object.keys(DESIGN_SYSTEMS).join(", ");
 
 export const TOOLS: ToolDef[] = [
   {
@@ -50,11 +53,10 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "get_design_system",
-    description:
-      "Get a coherent, ready-to-use design system (color palette, fonts, spacing, radius, shadows) for a named visual style. CALL THIS FIRST, before writing any CSS, then style everything with the returned CSS variables for a professional, consistent look. Styles: modern-saas, warm-artisan, playful, minimal-mono, dark-dashboard.",
+    description: `Get a coherent, ready-to-use design system (color palette, fonts, spacing, radius, shadows) for a named visual style. CALL THIS FIRST, before writing any CSS, then style everything with the returned CSS variables for a professional, consistent look. Styles: ${STYLE_KEYS}. Pick the one that best fits the request.`,
     parameters: {
       type: "object",
-      properties: { style: { type: "string", description: "one of: modern-saas, warm-artisan, playful, minimal-mono, dark-dashboard" } },
+      properties: { style: { type: "string", description: `one of: ${STYLE_KEYS}` } },
       required: ["style"],
     },
   },

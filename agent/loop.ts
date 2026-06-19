@@ -46,6 +46,21 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   const tools = buildTools({ useStitch: config.useStitch, enabled: config.enabledTools });
   const system = buildSystem(config.useStitch, config.systemOverride);
 
+  // The user pre-picked a design system? Fetch its tokens now and inject them so the
+  // model uses them directly — skipping the get_design_system turn. Fresh builds only.
+  let designSeed = "";
+  if (!config.iterate && config.designStyle) {
+    try {
+      const ds = await executor.call("get_design_system", { style: config.designStyle }, ctx);
+      const dsText = typeof ds === "string" ? ds : ds.text;
+      if (dsText && !dsText.startsWith("Unknown")) {
+        designSeed = `\n\nThe user picked this design system — USE these CSS variables directly and do NOT call get_design_system:\n${dsText}\n`;
+      }
+    } catch {
+      /* fall back to a model-chosen style */
+    }
+  }
+
   // Iterate mode seeds the model with the existing files and frames the task as a
   // change to make; a fresh build seeds the task as something to create.
   let initialUser: string;
@@ -60,7 +75,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     initialUser = iteratePrompt(config.task, files);
   } else {
     initialUser =
-      `Build this app:\n\n${config.task}\n\n` +
+      `Build this app:\n\n${config.task}\n${designSeed}\n` +
       (config.consoleErrors?.length
         ? `The current version produced these runtime errors in the browser — fix them:\n${config.consoleErrors.join("\n")}\n\n`
         : "") +
@@ -78,7 +93,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   let lastCompactIter = -1;
   const toolLog: string[] = []; // deterministic per-call digest — ground truth of work done
   let lastCritique = ""; // verbatim latest review_design critique (never summarized away)
-  let styleChosen = ""; // design system name once get_design_system succeeds
+  let styleChosen = designSeed ? (config.designStyle || "").toLowerCase() : ""; // pre-picked, or set once get_design_system succeeds
   const outstandingErrors: string[] = config.consoleErrors?.length ? [...config.consoleErrors] : [];
   // Thinking defaults OFF for speed (gemma4 otherwise spends its whole budget on a
   // reasoning trace before acting — the "5 min, no output" cause). The user toggle

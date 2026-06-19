@@ -21,6 +21,8 @@ export interface OxyStatus {
   features?: Record<string, boolean>;
   /** saved llama-server model refs for the picker (HF refs / paths); first is the default */
   llamaModels?: string[];
+  /** design systems offered in the picker (key + friendly label) */
+  designSystems?: Array<{ key: string; label: string }>;
 }
 
 export type BuildEvent =
@@ -43,7 +45,7 @@ export type AskEvent =
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
-  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode, features: j.features, llamaModels: j.llamaModels };
+  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode, features: j.features, llamaModels: j.llamaModels, designSystems: j.designSystems };
 }
 
 /** Toggle the "improvement" feature flags (server persists them; A/B testing). */
@@ -155,6 +157,8 @@ export interface BuildRequest {
   attachments?: Attachment[];
   /** allow the model's reasoning trace (default off — faster; gemma4 over-thinks) */
   think?: boolean;
+  /** a design system key the user pre-picked (empty ⇒ the model chooses) */
+  design?: string;
 }
 
 // POST a body and stream NDJSON events back as they happen (shared by build + ask).
