@@ -11,6 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 
@@ -99,6 +100,98 @@ function writeSettings(next) {
   const merged = { tools, terminalMode, features, llamaModels };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), "utf8");
   return merged;
+}
+
+// ---- downloadable-model catalog (browse + download from Hugging Face) ----
+const OXY_HOME = path.join(os.homedir(), ".oxy");
+const CATALOG_PATH = path.join(OXY_HOME, "model-catalog.json");
+const CATALOG_TTL_MS = 7 * 24 * 3600 * 1000; // a week — refresh button bypasses it
+// Targeted searches for small, build-friendly GGUF models (kept curated so the list is
+// useful, not the whole noisy HF index). Each picks the smallest sensible 4-bit quant.
+const HF_QUERIES = ["gemma-4-it GGUF", "Qwen2.5-Coder Instruct GGUF", "Qwen3 GGUF", "Llama-3.2 Instruct GGUF"];
+const QUANT_PREF = ["Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q3_K_M", "Q8_0"];
+function pickQuant(ggufs) {
+  const real = ggufs.filter((g) => !/mmproj/i.test(g));
+  for (const q of QUANT_PREF) {
+    const f = real.find((g) => g.toLowerCase().includes(q.toLowerCase()));
+    if (f) return q;
+  }
+  const m = real[0] && real[0].match(/(Q\d[0-9A-Z_]*|BF16|F16)/i);
+  return m ? m[1] : null;
+}
+async function fetchModelCatalog() {
+  const out = new Map();
+  for (const q of HF_QUERIES) {
+    try {
+      const url = `https://huggingface.co/api/models?search=${encodeURIComponent(q)}&filter=gguf&sort=downloads&direction=-1&limit=8&full=true`;
+      const r = await fetch(url, { headers: { "User-Agent": "oxy", Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) continue;
+      const arr = await r.json();
+      for (const m of arr) {
+        const repo = m.id || m.modelId;
+        if (!repo || out.has(repo)) continue;
+        // skip models too big for a 16GB iGPU machine: a "<N>B" size >= 9, or MoE
+        // (A<N>B) — they'd OOM. The custom "Add" field still allows any ref.
+        const sz = repo.match(/(\d+(?:\.\d+)?)\s*b\b/i);
+        if ((sz && parseFloat(sz[1]) >= 9) || /A\d+B/i.test(repo)) continue;
+        const ggufs = (m.siblings || []).map((s) => s.rfilename || "").filter((f) => f.toLowerCase().endsWith(".gguf"));
+        const quant = pickQuant(ggufs);
+        if (!quant) continue;
+        out.set(repo, { ref: `hf:${repo}:${quant}`, repo, quant, downloads: m.downloads || 0 });
+      }
+    } catch {
+      /* one query failing is fine */
+    }
+  }
+  return [...out.values()].sort((a, b) => b.downloads - a.downloads).slice(0, 30);
+}
+function readCatalog() {
+  try {
+    return JSON.parse(fs.readFileSync(CATALOG_PATH, "utf8"));
+  } catch {
+    return null;
+  }
+}
+// HF hub cache dir for a repo (where -hf downloads land): models--<org>--<repo>
+function hfRepoCacheDir(repo) {
+  return path.join(os.homedir(), ".cache", "huggingface", "hub", "models--" + repo.replace(/\//g, "--"));
+}
+function dirSizeBytes(dir) {
+  let total = 0;
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) total += dirSizeBytes(p);
+      else
+        try {
+          total += fs.statSync(p).size;
+        } catch {}
+    }
+  } catch {}
+  return total;
+}
+// total bytes to download for an hf:repo:quant (the matching gguf + sibling mmproj).
+// Uses the tree API, which (unlike ?full=true siblings) carries real file sizes.
+async function hfDownloadBytes(repo, quant) {
+  try {
+    const r = await fetch(`https://huggingface.co/api/models/${repo}/tree/main?recursive=1`, { headers: { "User-Agent": "oxy" }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return 0;
+    const data = await r.json();
+    const files = Array.isArray(data) ? data : [];
+    let model = 0;
+    const mmprojSizes = [];
+    for (const f of files) {
+      const name = (f.path || "").toLowerCase();
+      if (!name.endsWith(".gguf")) continue;
+      const size = f.size || (f.lfs && f.lfs.size) || 0;
+      if (/mmproj/i.test(name)) mmprojSizes.push(size);
+      else if (!quant || name.includes(quant.toLowerCase())) model += size;
+    }
+    // one model gguf + the single projector llama.cpp pairs with (use the smallest)
+    return model + (mmprojSizes.length ? Math.min(...mmprojSizes) : 0);
+  } catch {
+    return 0;
+  }
 }
 
 const MAX_FILE_BYTES = 512 * 1024;
@@ -610,6 +703,76 @@ export async function codelabHandler(req, res, next) {
       } catch (e) {
         return sendJson(res, 200, { ok: false, error: `Hugging Face check failed: ${String(e?.message ?? e).slice(0, 120)}` });
       }
+    }
+
+    // ---- Oxy: browse downloadable models (curated HF GGUF search), cached to disk.
+    // ?refresh=1 re-pulls from Hugging Face (for newer models). ----
+    if (pathPart === "/oxy/api/model/list" && req.method === "GET") {
+      const refresh = /[?&]refresh=1\b/.test(req.url || "");
+      let cat = readCatalog();
+      if (refresh || !cat || !cat.cachedAt || Date.now() - cat.cachedAt > CATALOG_TTL_MS) {
+        const models = await fetchModelCatalog();
+        if (models.length) {
+          cat = { models, cachedAt: Date.now() };
+          try {
+            fs.mkdirSync(OXY_HOME, { recursive: true });
+            fs.writeFileSync(CATALOG_PATH, JSON.stringify(cat), "utf8");
+          } catch {}
+        } else if (!cat) cat = { models: [], cachedAt: Date.now() };
+      }
+      return sendJson(res, 200, { ok: true, models: cat.models, cachedAt: cat.cachedAt });
+    }
+
+    // ---- Oxy: download a model NOW (prewarm llama.cpp's -hf cache by loading it),
+    // streaming progress (% from the growing HF cache dir). The model is ready after. ----
+    if (pathPart === "/oxy/api/model/download" && req.method === "POST") {
+      const body = await readBody(req);
+      let ref = String(body.ref || "").trim();
+      if (!ref) return sendJson(res, 200, { ok: false, error: "ref required" });
+      if (!ref.startsWith("hf:") && !/^https?:/i.test(ref) && !ref.includes("\\") && ref.split("/").length <= 2) ref = "hf:" + ref;
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/x-ndjson");
+      res.setHeader("Cache-Control", "no-store");
+      const send = (o) => {
+        try {
+          res.write(JSON.stringify(o) + "\n");
+        } catch {}
+      };
+      try {
+        send({ type: "status", message: "resolving on Hugging Face…" });
+        let total = 0;
+        let repoDir = null;
+        if (ref.startsWith("hf:")) {
+          const m = ref.slice(3).match(/^([^/:]+\/[^/:]+)(?::(.+))?$/);
+          if (m) {
+            total = await hfDownloadBytes(m[1], m[2]);
+            repoDir = hfRepoCacheDir(m[1]);
+          }
+        }
+        send({ type: "status", message: "downloading & loading… (first time can take a few minutes)" });
+        const { LlamaServerEngine } = await import("../engine/llama-server.ts");
+        const eng = new LlamaServerEngine({ modelRef: ref });
+        let done = false;
+        let err = null;
+        const boot = eng.ensureReady().then(() => (done = true)).catch((e) => {
+          done = true;
+          err = e;
+        });
+        const t0 = Date.now();
+        while (!done) {
+          const sz = repoDir ? dirSizeBytes(repoDir) : 0;
+          send({ type: "progress", pct: total ? Math.min(99, Math.round((sz / total) * 100)) : null, mb: Math.round(sz / 1e6), totalMb: Math.round(total / 1e6), secs: Math.round((Date.now() - t0) / 1000) });
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+        await boot;
+        if (err) send({ type: "error", message: String(err?.message ?? err).slice(0, 200) });
+        else send({ type: "done", ref });
+      } catch (e) {
+        send({ type: "error", message: String(e?.message ?? e) });
+      } finally {
+        res.end();
+      }
+      return;
     }
 
     // ---- run_command tool: gated + sandboxed shell execution. The backend is the

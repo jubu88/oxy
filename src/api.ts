@@ -60,6 +60,34 @@ export async function saveModels(llamaModels: string[]): Promise<string[] | null
   return j.ok ? (j.llamaModels ?? null) : null;
 }
 
+export interface DownloadableModel {
+  ref: string;
+  repo: string;
+  quant: string;
+  downloads: number;
+}
+
+/** Browse downloadable GGUF models (curated HF search, cached server-side). refresh re-pulls. */
+export async function listDownloadableModels(refresh = false): Promise<{ models: DownloadableModel[]; cachedAt: number }> {
+  try {
+    const r = await fetch(`/oxy/api/model/list${refresh ? "?refresh=1" : ""}`);
+    const j = await r.json();
+    return { models: j.models ?? [], cachedAt: j.cachedAt ?? 0 };
+  } catch {
+    return { models: [], cachedAt: 0 };
+  }
+}
+
+/** Download a model NOW (prewarm the cache + load it), streaming progress events. */
+export type DownloadEvent =
+  | { type: "status"; message: string }
+  | { type: "progress"; pct: number | null; mb: number; totalMb: number; secs: number }
+  | { type: "done"; ref: string }
+  | { type: "error"; message: string };
+export function downloadModel(ref: string, onEvent: (e: DownloadEvent) => void, signal?: AbortSignal): Promise<void> {
+  return streamNdjson("/oxy/api/model/download", { ref }, onEvent as (e: unknown) => void, signal);
+}
+
 /** Validate a Hugging Face model ref (repo exists + has a GGUF of that quant) before adding. */
 export async function checkModel(ref: string): Promise<{ ok: boolean; error?: string; note?: string }> {
   try {

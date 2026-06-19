@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { checkModel, saveFeatures, saveModels, saveStitchKey, saveToolSettings, type OxyStatus } from "./api.ts";
+import { useEffect, useState } from "react";
+import { checkModel, downloadModel, listDownloadableModels, saveFeatures, saveModels, saveStitchKey, saveToolSettings, type DownloadableModel, type OxyStatus } from "./api.ts";
 
 const modelLabel = (ref: string) => ref.replace(/^hf:/, "");
 
@@ -63,8 +63,48 @@ export function Settings({
   const [hfInput, setHfInput] = useState("");
   const [hfMsg, setHfMsg] = useState("");
   const [adding, setAdding] = useState(false);
+  const [catalog, setCatalog] = useState<DownloadableModel[]>([]);
+  const [browseRef, setBrowseRef] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [dl, setDl] = useState<{ active: boolean; pct: number | null; msg: string }>({ active: false, pct: null, msg: "" });
 
   const ollamaModels = engine === "ollama" ? status?.models ?? [] : [];
+
+  // load the downloadable-model catalog once (server caches it; Refresh re-pulls)
+  useEffect(() => {
+    listDownloadableModels(false)
+      .then((r) => setCatalog(r.models))
+      .catch(() => {});
+  }, []);
+
+  async function refreshCatalog() {
+    setRefreshing(true);
+    const r = await listDownloadableModels(true);
+    setRefreshing(false);
+    if (r.models.length) setCatalog(r.models);
+  }
+
+  // Download a browsed model NOW (prewarm + load), streaming progress, then select it.
+  async function downloadNow() {
+    if (!browseRef) return;
+    setDl({ active: true, pct: null, msg: "starting…" });
+    try {
+      await downloadModel(browseRef, (e) => {
+        if (e.type === "status") setDl((d) => ({ ...d, msg: e.message }));
+        else if (e.type === "progress") setDl({ active: true, pct: e.pct, msg: e.pct != null ? `${e.pct}% · ${e.mb}/${e.totalMb} MB · ${e.secs}s` : `${e.mb} MB · ${e.secs}s` });
+        else if (e.type === "done") setDl({ active: false, pct: 100, msg: "✓ downloaded & ready" });
+        else if (e.type === "error") setDl({ active: false, pct: null, msg: "✗ " + e.message });
+      });
+      const saved = await saveModels([...new Set([...llamaModels, browseRef])]);
+      if (saved) {
+        setLlamaModels(saved);
+        setModel(browseRef);
+        onSaved();
+      }
+    } catch (e: any) {
+      setDl({ active: false, pct: null, msg: "✗ " + String(e?.message ?? e) });
+    }
+  }
 
   // Add a Hugging Face model: validate it exists (+ has the quant) then save it to the picker.
   async function addHfModel() {
@@ -168,6 +208,7 @@ export function Settings({
               </div>
             ) : (
               <>
+                {/* active model (saved + downloaded) */}
                 <select className="settings-select" value={model || llamaModels[0] || ""} onChange={(e) => setModel(e.target.value)}>
                   {llamaModels.map((m, i) => (
                     <option key={m} value={m}>
@@ -176,14 +217,45 @@ export function Settings({
                     </option>
                   ))}
                 </select>
-                <div className="field-row" style={{ marginTop: 8 }}>
+
+                {/* browse + download from Hugging Face */}
+                <label style={{ marginTop: 14 }}>Download a model from Hugging Face</label>
+                <div className="field-row">
+                  <select className="settings-select" style={{ flex: 1 }} value={browseRef} onChange={(e) => setBrowseRef(e.target.value)}>
+                    <option value="">{catalog.length ? "— pick a model to download —" : "— loading list… —"}</option>
+                    {catalog.map((m) => (
+                      <option key={m.ref} value={m.ref}>
+                        {m.repo}:{m.quant}
+                        {m.downloads ? `  (${m.downloads.toLocaleString()}↓)` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn-ghost" onClick={refreshCatalog} disabled={refreshing} title="re-pull the list from Hugging Face (in case newer models appeared)">
+                    {refreshing ? "…" : "↻ Refresh"}
+                  </button>
+                </div>
+                <div className="field-row">
+                  <button className="build-btn" onClick={downloadNow} disabled={!browseRef || dl.active}>
+                    {dl.active ? "Downloading…" : "Download now"}
+                  </button>
+                  {dl.msg && <span className={`tool-hint ${dl.msg.startsWith("✗") ? "danger-text" : ""}`} style={{ alignSelf: "center" }}>{dl.msg}</span>}
+                </div>
+                {dl.active && dl.pct != null && (
+                  <div className="dl-bar">
+                    <div className="dl-fill" style={{ width: `${dl.pct}%` }} />
+                  </div>
+                )}
+
+                {/* add any custom ref (downloads on first build) */}
+                <label style={{ marginTop: 14 }}>…or add a custom ref</label>
+                <div className="field-row">
                   <input
                     value={hfInput}
                     onChange={(e) => setHfInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") addHfModel();
                     }}
-                    placeholder="Hugging Face: org/repo:Quant — e.g. unsloth/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M"
+                    placeholder="org/repo:Quant — e.g. unsloth/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M"
                     spellCheck={false}
                   />
                   <button className="build-btn" onClick={addHfModel} disabled={adding || !hfInput.trim()}>
@@ -191,7 +263,7 @@ export function Settings({
                   </button>
                 </div>
                 <span className={`tool-hint ${hfMsg.startsWith("✗") ? "danger-text" : ""}`}>
-                  {hfMsg || "Pick a saved model, or add any GGUF from Hugging Face — it validates the repo, then downloads on first build (one-time)."}
+                  {hfMsg || "“Download now” fetches the model immediately; “Add” saves a ref that downloads on first build. The list is cached — Refresh re-pulls it."}
                 </span>
               </>
             )}
