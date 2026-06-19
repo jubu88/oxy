@@ -660,10 +660,13 @@ export async function codelabHandler(req, res, next) {
             onStep: (s) => {
               for (const t of s.toolCalls) toolLog.push(t.name);
               if (s.done) finished = true;
+              lastTok = 0; // a turn landed — the live counter resets per turn, so reset the throttle too
               send({ type: "step", step: s });
             },
             onProgress: (p) => {
-              if (p.tokens - lastTok >= 25) {
+              // emit the first token of each turn immediately (so the meter lights up fast),
+              // then throttle to every ~20. p.tokens resets per turn; lastTok is reset in onStep.
+              if (p.tokens === 1 || p.tokens - lastTok >= 20) {
                 lastTok = p.tokens;
                 send({ type: "progress", iteration: p.iteration, tokens: p.tokens });
               }

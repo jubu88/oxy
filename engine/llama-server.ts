@@ -326,6 +326,14 @@ export class LlamaServerEngine implements Engine {
       "--host", "127.0.0.1",
       "--port", String(this.port),
       "-c", String(this.contextSize),
+      "-np", "1", // ONE slot — otherwise llama-server splits -c across N parallel slots
+      //            (it defaults to 4), giving each build only n_ctx/4 (e.g. 4096) context.
+      //            A real build (skill + tool schemas + a full page) overflows that and
+      //            the generate stalls. Oxy is single-user: give the whole context to one slot.
+      "-ctk", "q8_0", "-ctv", "q8_0", // quantize the KV cache (~halves it). A full 16384-ctx
+      //            f16 cache is ~2.6GB on top of the 4.4GB model = ~7GB → on a 16GB machine
+      //            that leaves too little and the build swaps to ~2 tok/s. q8_0 keeps the full
+      //            context but fits RAM (negligible quality cost).
       "-ngl", String(this.gpuLayers),
       "--jinja", // use the model's embedded chat template (gemma tool-calling format)
     ];

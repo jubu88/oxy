@@ -132,6 +132,18 @@ async function imageToAttachmentData(f: File, maxEdge = 1024): Promise<{ data: s
   }
 }
 
+// One row in the build-progress list: a phase ("loading model…", "generating…") or a
+// completed step (a tool call), each with how long it took. The active row is tracked
+// separately (activeLabel) and shows a live timer.
+interface TimelineItem {
+  kind: "phase" | "step";
+  label: string;
+  ms: number;
+  tags?: Array<{ cls: string; label: string }>;
+  done?: boolean;
+  icon?: string;
+}
+
 export function App() {
   const [status, setStatus] = useState<OxyStatus | null>(null);
   const [engine, setEngine] = useState(() => loadPrefs().engine || "ollama");
@@ -155,11 +167,13 @@ export function App() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [liveTokens, setLiveTokens] = useState(0); // tokens streamed in the current turn
   const [, setNowTick] = useState(0); // 1s heartbeat so the elapsed timer re-renders
-  const [stepMs, setStepMs] = useState<number[]>([]); // how long each completed step took (ms), aligned to steps[]
+  const [items, setItems] = useState<TimelineItem[]>([]); // completed phase/step rows, each with its duration
+  const [activeLabel, setActiveLabel] = useState(""); // the in-progress row's label (live timer)
   const [lastBuildMs, setLastBuildMs] = useState(0); // total wall-clock of the last finished build
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const genStartRef = useRef<number>(0); // when the current generate/turn started (resets each step)
+  const activeLabelRef = useRef(""); // current active label, read inside the streaming callback (avoids stale closure)
+  const genStartRef = useRef<number>(0); // when the current row started (resets each phase/step)
   const buildStartRef = useRef<number>(0); // when the whole build started (never resets) — overall timer
 
   useEffect(() => {
@@ -233,14 +247,23 @@ export function App() {
     }
   }
 
+  // close the current row, recording its label + how long it took, into the list
+  function closeRow(kind: "phase" | "step", label: string, extra?: Partial<TimelineItem>) {
+    const ms = Date.now() - genStartRef.current;
+    setItems((prev) => [...prev, { kind, label, ms, ...extra }]);
+    genStartRef.current = Date.now();
+    setLiveTokens(0);
+  }
+
   async function build() {
     if (building || !task.trim()) return;
     setBuilding(true);
     setError("");
     setSteps([]);
-    setStepMs([]);
+    setItems([]);
     setLastBuildMs(0);
-    setStatusMsg("starting…");
+    activeLabelRef.current = "starting…";
+    setActiveLabel("starting…");
     setLiveTokens(0);
     genStartRef.current = Date.now();
     buildStartRef.current = Date.now();
@@ -252,22 +275,29 @@ export function App() {
       await runBuild(
         { task: task.trim(), engine, model: model || undefined, useStitch, project: selProject || undefined, baseUrl: engine === "openai" ? baseUrl : undefined, attachments: attachments.length ? attachments : undefined },
         (e: BuildEvent) => {
-          if (e.type === "status") setStatusMsg(e.message);
-          else if (e.type === "project") {
+          if (e.type === "status") {
+            // a new phase begins — record the previous active row as a phase, then switch
+            if (activeLabelRef.current) closeRow("phase", activeLabelRef.current);
+            activeLabelRef.current = e.message;
+            setActiveLabel(e.message);
+          } else if (e.type === "project") {
             builtId = e.project;
             setProject(e.project);
           } else if (e.type === "step") {
-            setStatusMsg("");
-            const took = Date.now() - genStartRef.current; // how long THIS step took
-            setStepMs((prev) => [...prev, took]);
+            // the active turn produced a tool call — record it AS that step (with its timer)
+            closeRow("step", stepLabel(e.step), { tags: tagsFor(e.step), done: e.step.done, icon: iconFor(e.step) });
             setSteps((prev) => [...prev, e.step]);
-            setLiveTokens(0); // a turn landed — reset the live counter for the next generate
-            genStartRef.current = Date.now();
+            activeLabelRef.current = e.step.done ? "" : "generating…";
+            setActiveLabel(activeLabelRef.current);
             if (e.step.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name))) setPreviewKey((k) => k + 1);
           } else if (e.type === "progress") {
             setLiveTokens(e.tokens);
-          } else if (e.type === "done") setPreviewKey((k) => k + 1);
-          else if (e.type === "error") setError(e.message);
+          } else if (e.type === "done") {
+            if (activeLabelRef.current) closeRow("phase", activeLabelRef.current, { done: true });
+            activeLabelRef.current = "";
+            setActiveLabel("");
+            setPreviewKey((k) => k + 1);
+          } else if (e.type === "error") setError(e.message);
         },
         ac.signal,
       );
@@ -279,7 +309,8 @@ export function App() {
     } finally {
       setLastBuildMs(Date.now() - buildStartRef.current); // freeze the total
       setBuilding(false);
-      setStatusMsg("");
+      activeLabelRef.current = "";
+      setActiveLabel("");
       abortRef.current = null;
     }
   }
@@ -461,48 +492,46 @@ export function App() {
 
         {error && <div className="banner error">{error}</div>}
 
-        {mode === "build" && (steps.length > 0 || building) && (
+        {mode === "build" && (items.length > 0 || building) && (
           <section>
             <p className="section-title">
               Build progress
               {overallElapsed > 0 && <span className="section-timer">{fmtElapsed(overallElapsed)}</span>}
             </p>
-            {displayStatus && steps.length === 0 && (
-              <div className="timeline empty">
-                <div className="card">
-                  <div className="left">
-                    <span className="material-symbols-outlined">hourglass_top</span>
-                    <code>{displayStatus}</code>
+            <div className="timeline">
+              {items.map((it, i) => (
+                <div key={i} className="step">
+                  <div className="node">
+                    <span className="material-symbols-outlined">{it.icon ?? (it.kind === "phase" ? "hourglass_top" : "check")}</span>
                   </div>
-                  {liveLabel && <span className="live">{liveLabel}</span>}
-                </div>
-              </div>
-            )}
-            <div className={`timeline${steps.length === 0 ? " empty" : ""}`}>
-              {steps.map((s, i) => {
-                const active = building && i === steps.length - 1;
-                const done = s.done || (!active && !building);
-                return (
-                  <div key={i} className={`step${active ? " active" : ""}`}>
-                    <div className="node">{active ? <span className="dot" /> : <span className="material-symbols-outlined">{done ? "check" : iconFor(s)}</span>}</div>
-                    <div className="card">
-                      <div className="left">
-                        <span className="material-symbols-outlined">{iconFor(s)}</span>
-                        <code>{stepLabel(s)}</code>
-                      </div>
-                      <div className="tags">
-                        {active && liveLabel && <span className="tag-pill live">{liveLabel}</span>}
-                        {!active && stepMs[i] != null && <span className="tag-pill time">{fmtElapsed(stepMs[i])}</span>}
-                        {tagsFor(s).map((t) => (
-                          <span key={t.label} className={`tag-pill ${t.cls}`}>
-                            {t.label}
-                          </span>
-                        ))}
-                      </div>
+                  <div className="card">
+                    <div className="left">
+                      <code>{it.label}</code>
+                    </div>
+                    <div className="tags">
+                      <span className="tag-pill time">{fmtElapsed(it.ms)}</span>
+                      {it.tags?.map((t) => (
+                        <span key={t.label} className={`tag-pill ${t.cls}`}>
+                          {t.label}
+                        </span>
+                      ))}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
+              {building && activeLabel && (
+                <div className="step active">
+                  <div className="node">
+                    <span className="dot" />
+                  </div>
+                  <div className="card">
+                    <div className="left">
+                      <code>{activeLabel}</code>
+                    </div>
+                    <div className="tags">{liveLabel && <span className="tag-pill live">{liveLabel}</span>}</div>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}
