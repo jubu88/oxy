@@ -190,6 +190,7 @@ export class LlamaServerEngine implements Engine {
   private child: ChildProcess | null = null;
   private inner: OpenAICompatEngine | null = null;
   private ready = false;
+  private everBooted = false; // once true, the GGUF is cached → reboots wait seconds, not the 900s download budget
 
   constructor(opts: LlamaServerOptions = {}) {
     this.modelRef = opts.modelRef ?? process.env.OXY_MODEL ?? DEFAULT_MODEL;
@@ -287,7 +288,7 @@ export class LlamaServerEngine implements Engine {
     await sleep(600); // let the OS free the port before we rebind
   }
 
-  async ensureReady(): Promise<void> {
+  async ensureReady(healthMs?: number): Promise<void> {
     if (this.ready) return;
     // reuse a llama-server already serving on our port instead of spawning a
     // duplicate (a second model load blows up RAM + fights for the port) — BUT only
@@ -307,8 +308,12 @@ export class LlamaServerEngine implements Engine {
     }
     if (this.variant === "auto") this.variant = await detectVariant();
     this.gpuLayers = this.nglOverride ?? (this.variant === "cpu" ? 0 : 999);
+    // first boot may download a multi-GB GGUF (900s budget); a REBOOT is cached so cap it
+    // tight (180s). Without this a wedged mid-build reboot froze the whole build silently in
+    // waitForHealth for up to 15 min (× the GPU→CPU fallback = ~30 min) with no UI feedback.
+    const hm = healthMs ?? (this.everBooted ? 180_000 : 900_000);
     try {
-      await this.boot();
+      await this.boot(hm);
     } catch (e: any) {
       if (this.variant === "cpu") throw e;
       // a GPU backend can fail (driver/VRAM/loader) — fall back to CPU so a build never blocks
@@ -316,12 +321,12 @@ export class LlamaServerEngine implements Engine {
       await this.dispose();
       this.variant = "cpu";
       this.gpuLayers = 0;
-      await this.boot();
+      await this.boot(hm);
     }
     this.ready = true;
   }
 
-  private async boot(): Promise<void> {
+  private async boot(healthMs = 900_000): Promise<void> {
     console.log(`[oxy] llama-server backend: ${this.variant} (${this.gpuLayers > 0 ? "GPU-offload" : "CPU"})`);
     const bin = await ensureBinary(this.variant);
     const args = [
@@ -350,8 +355,8 @@ export class LlamaServerEngine implements Engine {
     this.child.stderr?.on("data", (d) => (stderrTail = (stderrTail + d).slice(-800)));
     this.child.on("error", (e) => (stderrTail += `\n${e.message}`));
     try {
-      // generous: first run may download a multi-GB GGUF via -hf before serving
-      await this.waitForHealth(900_000);
+      // generous on first run (may download a multi-GB GGUF via -hf); tight on reboot (cached)
+      await this.waitForHealth(healthMs);
     } catch (e: any) {
       this.child?.kill();
       this.child = null;
@@ -360,6 +365,7 @@ export class LlamaServerEngine implements Engine {
     // drive the running server through the OpenAI-compatible adapter
     this.inner = new OpenAICompatEngine({ baseUrl: `${this.base()}/v1`, idleTimeout: this.idleTimeout });
     await this.inner.ensureReady();
+    this.everBooted = true;
   }
 
   async listModels(): Promise<EngineModelInfo[]> {
@@ -385,6 +391,7 @@ export class LlamaServerEngine implements Engine {
       // the managed server may have died or hung (iGPU/Vulkan can crash under
       // sustained load). reboot once and retry so one death doesn't poison the run.
       console.warn(`[oxy] llama-server generate failed (${String(e?.message ?? e).slice(0, 80)}) — rebooting and retrying once`);
+      opts.onNotice?.("the local model server stalled — restarting it (up to ~3 min)…"); // so the build shows this instead of silently freezing
       try {
         await this.dispose();
       } catch {
@@ -392,6 +399,7 @@ export class LlamaServerEngine implements Engine {
       }
       await this.killExisting(); // also clear an orphaned/wedged server this instance didn't spawn
       await this.ensureReady();
+      opts.onNotice?.("model server back up — retrying…");
       return await this.inner!.generate(messages, tools, opts);
     }
   }

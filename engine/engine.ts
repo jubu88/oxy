@@ -64,6 +64,9 @@ export interface GenerateOptions {
    *  tool-call argument fragment. Drives the live token meter so it doesn't read 0
    *  while the model thinks or streams a write_file's body as a tool call. */
   onProgressTick?: () => void;
+  /** out-of-band status (e.g. "model server stalled — restarting…") so a managed-engine
+   *  reboot mid-generate is shown to the user instead of looking like a frozen build. */
+  onNotice?: (message: string) => void;
 }
 
 export interface GenerateResult {
