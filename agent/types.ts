@@ -68,6 +68,9 @@ export interface AgentConfig {
    * to make (read before editing, prefer edit_file, keep what works).
    */
   iterate?: boolean;
+  /** the ORIGINAL build prompt for this project (persisted per project). On iterate it's
+   *  seeded so the model knows what the app IS, not just the one change being requested. */
+  projectGoal?: string;
   /**
    * Override the system prompt — the optimizable "skill" (SkillOpt). When unset,
    * the loop uses the built-in SYSTEM seed (or a deployed skill/system.md).

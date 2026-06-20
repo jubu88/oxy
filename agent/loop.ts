@@ -36,11 +36,13 @@ export interface RunAgentDeps {
   onStep: (step: AgentStep) => void;
   /** live token-by-token progress within a turn */
   onProgress?: (progress: AgentProgress) => void;
+  /** out-of-band status (e.g. a managed-engine reboot mid-generate) for the UI */
+  onNotice?: (message: string) => void;
   signal?: AbortSignal;
 }
 
 export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise<void> {
-  const { engine, executor, onStep, onProgress, signal } = deps;
+  const { engine, executor, onStep, onProgress, onNotice, signal } = deps;
   const ctx = { project: config.project };
 
   const tools = buildTools({ useStitch: config.useStitch, enabled: config.enabledTools });
@@ -72,7 +74,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     } catch {
       /* none yet */
     }
-    initialUser = iteratePrompt(config.task, files);
+    initialUser = iteratePrompt(config.task, files, config.projectGoal);
   } else {
     initialUser =
       `Build this app:\n\n${config.task}\n${designSeed}\n` +
@@ -162,6 +164,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
         numPredict: NUM_PREDICT,
         think: ranWithThink,
         signal,
+        onNotice,
         onToken: (chunk) => {
           liveText += chunk; // content only (used for the downstream-dropped progress text)
         },
@@ -302,9 +305,10 @@ function safeParse(s: string): any {
 
 // Seed for iterating on an existing project: give the model the current files and
 // frame the task as a change, so it edits in place instead of rebuilding.
-function iteratePrompt(task: string, files: FileEntry[]): string {
+function iteratePrompt(task: string, files: FileEntry[], goal?: string): string {
   return (
     `You are MODIFYING an existing project — do NOT start over or recreate files from scratch. read_file before you edit, and prefer edit_file over rewriting whole files.\n\n` +
+    (goal?.trim() ? `WHAT THIS PROJECT IS (the original request — preserve its intent while making the change):\n${goal.trim()}\n\n` : "") +
     `FILES ALREADY ON DISK:\n${files.map((f) => `- ${f.path} (${f.bytes} bytes)`).join("\n") || "(none yet)"}\n\n` +
     `THE CHANGE TO MAKE:\n${task}\n\n` +
     `Read the relevant files first, make the change, and keep everything else working. The entry file must remain index.html. Call done when finished.`

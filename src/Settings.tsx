@@ -33,6 +33,9 @@ export function Settings({
   setBaseUrl,
   useStitch,
   setUseStitch,
+  selProject,
+  stitchProjectId,
+  onSaveStitchProjectId,
   tools: initialTools,
   terminalMode: initialMode,
   features: initialFeatures,
@@ -49,6 +52,10 @@ export function Settings({
   setBaseUrl: (u: string) => void;
   useStitch: boolean;
   setUseStitch: (b: boolean) => void;
+  /** the currently selected project ("" for a new build) and its linked Stitch id */
+  selProject: string;
+  stitchProjectId: string;
+  onSaveStitchProjectId: (id: string) => Promise<void> | void;
   tools?: Record<string, boolean>;
   terminalMode?: string;
   features?: Record<string, boolean>;
@@ -69,6 +76,20 @@ export function Settings({
   const [browseRef, setBrowseRef] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [dl, setDl] = useState<{ active: boolean; pct: number | null; msg: string }>({ active: false, pct: null, msg: "" });
+  const [stitchId, setStitchId] = useState(stitchProjectId || "");
+  const [stitchIdMsg, setStitchIdMsg] = useState("");
+
+  // keep the field in sync when the selected project (and thus its Stitch id) changes
+  useEffect(() => {
+    setStitchId(stitchProjectId || "");
+    setStitchIdMsg("");
+  }, [stitchProjectId, selProject]);
+
+  async function commitStitchId() {
+    setStitchIdMsg("saving…");
+    await onSaveStitchProjectId(stitchId.trim());
+    setStitchIdMsg("saved ✓");
+  }
 
   const ollamaModels = engine === "ollama" ? status?.models ?? [] : [];
 
@@ -338,6 +359,17 @@ export function Settings({
               <span className="tool-hint">use Google Stitch (cloud) to design the page — the prompt is sent to Google</span>
             </label>
           )}
+          {stitchAvailable && selProject && (
+            <div className="field">
+              <label>Stitch project ID — for the selected project</label>
+              <div className="field-row">
+                <input value={stitchId} onChange={(e) => setStitchId(e.target.value)} placeholder="paste a Stitch project id or URL — or leave blank" spellCheck={false} />
+                <button className="build-btn" onClick={commitStitchId}>Save</button>
+              </div>
+              <span className="field-status">{stitchIdMsg || "design_with_stitch reuses this. Paste a design you made in Stitch to build on it; clear it to start a fresh Stitch project next build."}</span>
+            </div>
+          )}
+          {stitchAvailable && !selProject && <span className="tool-hint">Pick a project in the top dropdown to view or set its linked Stitch design.</span>}
         </div>
 
         <div className="modal-actions">

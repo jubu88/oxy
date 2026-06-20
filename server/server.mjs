@@ -15,6 +15,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { shouldAutoPromote } from "./auto-promote.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
 // (it hallucinated on test images), so default to a dedicated small VLM. moondream
@@ -29,6 +30,29 @@ let sharedBrowser = null; // reused Playwright browser instance
 // would point at a temp file). All run modes launch from the repo root.
 const ROOT = process.env.OXY_ROOT || process.cwd();
 const PROJECTS = path.resolve(ROOT, "workspace", "projects");
+
+// Per-project memory — hidden like the compaction checkpoint (.codelab prefix ⇒ not shown
+// to the model, not exported). Holds the ORIGINAL prompt (so updates know what the app is)
+// and the Stitch project id (so design-iterations reuse the cloud project instead of losing it).
+const PROJECT_META = ".codelab-project.json";
+function readProjectMeta(project) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PROJECTS, project, PROJECT_META), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function writeProjectMeta(project, patch) {
+  try {
+    const dir = path.join(PROJECTS, project);
+    fs.mkdirSync(dir, { recursive: true });
+    const next = { ...readProjectMeta(project), ...patch };
+    fs.writeFileSync(path.join(dir, PROJECT_META), JSON.stringify(next, null, 2), "utf8");
+    return next;
+  } catch {
+    return {};
+  }
+}
 
 // local Stable Diffusion (stable-diffusion.cpp). Paths are overridable via env;
 // feature degrades gracefully (tool reports "unavailable") if absent.
@@ -73,8 +97,15 @@ const DEFAULT_FEATURES = {
 };
 const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES);
 // Saved llama-server model refs shown in the Settings picker (the user can add any HF
-// GGUF). Seeded with the two gemma4 options; the default (e2b) is first.
-const DEFAULT_MODELS = ["hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M", "hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M"];
+// GGUF). Seeded with the two gemma4 options + two stronger coders; the default (e2b) is
+// first. Qwen2.5-Coder-7B (~4.7GB Q4) fits 16GB comfortably; gemma-4-12b (~7GB Q4) is a
+// tight fit on 16GB and slow on an iGPU — both are far stronger for full-stack than e2b.
+const DEFAULT_MODELS = [
+  "hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M",
+  "hf:ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M",
+  "hf:Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
+  "hf:unsloth/gemma-4-12b-it-GGUF:Q4_K_M",
+];
 const sanitizeModels = (arr) =>
   Array.isArray(arr) ? [...new Set(arr.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim()))].slice(0, 40) : null;
 function readSettings() {
@@ -338,7 +369,7 @@ function listProjects() {
     .filter((d) => fs.statSync(path.join(PROJECTS, d)).isDirectory())
     .map((d) => {
       const files = listFiles(d);
-      return { id: d, files: files.length, hasIndex: files.some((f) => f.path === "index.html"), mtime: fs.statSync(path.join(PROJECTS, d)).mtimeMs };
+      return { id: d, files: files.length, hasIndex: files.some((f) => f.path === "index.html"), mtime: fs.statSync(path.join(PROJECTS, d)).mtimeMs, stitchProjectId: readProjectMeta(d).stitchProjectId || "" };
     })
     .sort((a, b) => b.mtime - a.mtime);
 }
@@ -701,9 +732,17 @@ export async function stitchGenerate(prompt, opts = {}) {
   stitchBusy = true;
   const t0 = Date.now();
   try {
-    const cp = await stitchCall("create_project", { title: String(opts.title || "oxy").slice(0, 60) }, 60_000);
-    const projectId = String(cp.structuredContent?.name || "").replace(/^projects\//, "");
-    if (!projectId) throw new Error("could not create a Stitch project");
+    // reuse a previously-created Stitch project (passed from the project's saved metadata) so
+    // a design UPDATE builds on the same cloud project instead of starting a fresh one each time.
+    let projectId = String(opts.projectId || "").trim().replace(/^projects\//, "");
+    if (!projectId) {
+      const cp = await stitchCall("create_project", { title: String(opts.title || "oxy").slice(0, 60) }, 60_000);
+      projectId = String(cp.structuredContent?.name || "").replace(/^projects\//, "");
+      if (!projectId) throw new Error("could not create a Stitch project");
+    }
+    // persist the id NOW — generate_screen below can take minutes and may hit the timeout;
+    // without this an otherwise-created Stitch project would be lost on a slow generate.
+    opts.onProjectId?.(projectId);
     const args = { projectId, prompt: prompt.slice(0, 2000), deviceType: opts.deviceType === "MOBILE" ? "MOBILE" : "DESKTOP" };
     if (opts.designSystem) args.designSystem = opts.designSystem;
     const g = await stitchCall("generate_screen_from_text", args);
@@ -981,8 +1020,23 @@ export async function codelabHandler(req, res, next) {
         // continue an existing project (iterate) when an id is supplied, else create one
         let project = typeof body.project === "string" && body.project ? body.project : null;
         const iterate = !!project;
+        const useStitch = !!body.useStitch;
         if (!project) project = await createProject(task.slice(0, 40), baseUrl);
         send({ type: "project", project, iterate });
+        // per-project memory: persist the original prompt on a NEW build so updates remember
+        // what the app is; on iterate, read it back and seed it (config.projectGoal below).
+        if (!iterate) writeProjectMeta(project, { prompt: task, design: typeof body.design === "string" ? body.design : "", createdAt: new Date().toISOString() });
+        // when Stitch is on, the PAGE must come from Stitch — lock index.html so the model
+        // can't bypass it with its own write_file (the /write handler enforces this below).
+        writeProjectMeta(project, { stitchLock: useStitch });
+        const projectGoal = iterate ? readProjectMeta(project).prompt || "" : "";
+        // iterating over an existing project: deterministically repair files FIRST, so a
+        // broken one (e.g. app.js wrapped in <script> → "Unexpected token '<'") is healed
+        // before the model touches it — instead of the model thrashing to fix it by hand.
+        if (iterate) {
+          const swept = sanitizeProject(path.join(PROJECTS, project));
+          if (swept.length) send({ type: "status", message: `auto-repaired ${swept.length} file(s): ${swept.join(" · ")}` });
+        }
         const executor = new HttpToolExecutor({ baseUrl });
         // use the deployed (e.g. SkillOpt-tuned) skill if present — unless the user
         // turned skills off in Settings (then the loop's built-in default prompt is used).
@@ -1005,9 +1059,10 @@ export async function codelabHandler(req, res, next) {
             project,
             maxIterations: Number(body.maxIterations) || 14,
             temperature: Number(body.temperature) || 0.6,
-            useStitch: !!body.useStitch,
+            useStitch,
             designStyle: typeof body.design === "string" ? body.design : "",
             iterate,
+            projectGoal, // original prompt (persisted) so updates know what the app is
             systemOverride,
             attachments: attachments && attachments.length ? attachments : undefined,
             enabledTools: readSettings().tools,
@@ -1019,6 +1074,7 @@ export async function codelabHandler(req, res, next) {
             engine,
             executor,
             signal: ac.signal,
+            onNotice: (message) => send({ type: "status", message }), // surface a managed-engine reboot instead of a silent freeze
             onStep: (s) => {
               for (const t of s.toolCalls) toolLog.push(t.name);
               if (s.done) finished = true;
@@ -1035,6 +1091,13 @@ export async function codelabHandler(req, res, next) {
             },
           },
         );
+        // a build that ran out of turns without the model calling done isn't an error, but
+        // it shouldn't look like a silent stop either — say so (the files are still saved).
+        if (!finished && !ac.signal.aborted) send({ type: "status", message: "stopped: reached the step limit before finishing — your files are saved; iterate to continue" });
+        // post-build static verify: surface what couldn't be auto-fixed (JS syntax errors,
+        // links to files that don't exist) so the user knows what one more iterate would fix.
+        const verifyIssues = verifyProject(path.join(PROJECTS, project));
+        if (verifyIssues.length) send({ type: "status", message: `verify: ${verifyIssues.length} issue(s) to fix — ${verifyIssues.slice(0, 3).join(" · ")}` });
         send({ type: "done", project });
         // continuous improvement: review THIS build in the background (best-effort,
         // never blocks the response). watch-always; deploy stays gated (promote.ts).
@@ -1167,6 +1230,15 @@ export async function codelabHandler(req, res, next) {
       const { name } = await readBody(req);
       return sendJson(res, 200, { ok: true, id: createProject(name) });
     }
+    // set/clear a project's Stitch project id (so the user can paste a design they made in
+    // Stitch, or correct a lost one — design_with_stitch then reuses it)
+    if (pathPart === "/codelab/api/project-stitch" && req.method === "POST") {
+      const { project, stitchProjectId } = await readBody(req);
+      if (typeof project !== "string" || !project) return sendJson(res, 200, { ok: false, error: "project required" });
+      const id = String(stitchProjectId || "").trim().replace(/^.*\/projects\//, "").replace(/^projects\//, "");
+      const meta = writeProjectMeta(project, { stitchProjectId: id });
+      return sendJson(res, 200, { ok: true, stitchProjectId: meta.stitchProjectId || "" });
+    }
 
     // ---- file tools (project-scoped) ----
     if (pathPart === "/codelab/api/list" && req.method === "GET") {
@@ -1187,21 +1259,32 @@ export async function codelabHandler(req, res, next) {
       const content = fs.readFileSync(p, "utf8");
       const matches = content.split(old_string).length - 1;
       if (matches === 0) return sendJson(res, 200, { ok: false, error: "old_string not found in the file — copy the exact text to replace" });
-      const updated = content.replace(old_string, typeof new_string === "string" ? new_string : "");
+      const replaced = content.replace(old_string, typeof new_string === "string" ? new_string : "");
+      // deterministic repair: strip an HTML/markdown wrapper a small model often leaves in
+      // a .js/.css file (the fatal "Unexpected token '<'") — heals broken files as you iterate
+      const { content: updated, fixes } = sanitizeFileContent(rel, replaced);
       if (Buffer.byteLength(updated, "utf8") > MAX_FILE_BYTES) return sendJson(res, 200, { ok: false, error: "result too large" });
       fs.writeFileSync(p, updated, "utf8");
-      return sendJson(res, 200, { ok: true, path: rel, replacedFirstOf: matches, bytes: Buffer.byteLength(updated, "utf8") });
+      return sendJson(res, 200, { ok: true, path: rel, replacedFirstOf: matches, bytes: Buffer.byteLength(updated, "utf8"), ...(fixes.length ? { repaired: fixes } : {}) });
     }
     if (pathPart === "/codelab/api/write" && req.method === "POST") {
-      const { project, path: rel, content } = await readBody(req);
+      const { project, path: rel, content: raw } = await readBody(req);
       const p = safePath(project, rel);
       checkExt(p);
-      if (typeof content !== "string") throw new Error("content must be a string");
+      if (typeof raw !== "string") throw new Error("content must be a string");
+      // Stitch mode: the page design must come from design_with_stitch. Block overwriting
+      // index.html with a hand-written page (the model otherwise ignores Stitch and rebuilds it).
+      if (/(^|\/)index\.html$/i.test(String(rel)) && readProjectMeta(project).stitchLock) {
+        return sendJson(res, 200, { ok: false, error: "Stitch is enabled for this project — create the page with design_with_stitch (not write_file). Once it generates index.html, refine it with edit_file, and put app logic in app.js." });
+      }
+      // deterministic repair before saving: a .js/.css wrapped in <script>/<style>/``` is a
+      // fatal syntax error the model can't reliably self-fix; strip it (always safe).
+      const { content, fixes } = sanitizeFileContent(rel, raw);
       if (Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES) throw new Error("file too large");
       if (listFiles(project).length >= MAX_FILES && !fs.existsSync(p)) throw new Error("too many files");
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, content, "utf8");
-      return sendJson(res, 200, { ok: true, path: rel, bytes: Buffer.byteLength(content, "utf8") });
+      return sendJson(res, 200, { ok: true, path: rel, bytes: Buffer.byteLength(content, "utf8"), ...(fixes.length ? { repaired: fixes } : {}) });
     }
     if (pathPart === "/codelab/api/web-fetch" && req.method === "POST") {
       const { url } = await readBody(req);
@@ -1236,7 +1319,27 @@ export async function codelabHandler(req, res, next) {
     }
     if (pathPart === "/codelab/api/design-stitch" && req.method === "POST") {
       const { project, path: rel, prompt, deviceType, designSystem } = await readBody(req);
-      const r = await stitchGenerate(prompt, { deviceType, designSystem, title: project });
+      // reuse this project's Stitch project across design updates; persist the id the MOMENT
+      // it's created (onProjectId) so a slow/timed-out generate can't lose it.
+      let r;
+      try {
+        r = await stitchGenerate(prompt, {
+          deviceType,
+          designSystem,
+          title: project,
+          projectId: readProjectMeta(project).stitchProjectId,
+          onProjectId: (id) => {
+            writeProjectMeta(project, { stitchProjectId: id });
+            console.log(`[oxy] stitch project ${id} saved for ${project}`);
+          },
+        });
+      } catch (e) {
+        // Stitch failed (e.g. generate timed out) — unlock index.html so the model can
+        // still build the page itself instead of being stuck unable to write it.
+        writeProjectMeta(project, { stitchLock: false });
+        throw e;
+      }
+      writeProjectMeta(project, { stitchProjectId: r.stitchProjectId });
       // write the generated HTML into the jailed project (so we don't push
       // ~10KB of HTML back through the model's context). Reuses the write jail.
       const target = rel || "index.html";

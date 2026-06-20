@@ -112,6 +112,8 @@ export interface ProjectInfo {
   files: number;
   hasIndex: boolean;
   mtime: number;
+  /** the Stitch project this app's design is linked to ("" if none) */
+  stitchProjectId?: string;
 }
 
 export async function getProjects(): Promise<ProjectInfo[]> {
@@ -121,6 +123,17 @@ export async function getProjects(): Promise<ProjectInfo[]> {
     return (j.projects ?? []).filter((p: ProjectInfo) => p.hasIndex);
   } catch {
     return [];
+  }
+}
+
+/** Set (or clear) a project's linked Stitch project id. Accepts a bare id or a full URL. */
+export async function saveStitchProjectId(project: string, stitchProjectId: string): Promise<string | null> {
+  try {
+    const r = await fetch("/codelab/api/project-stitch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project, stitchProjectId }) });
+    const j = await r.json();
+    return j.ok ? (j.stitchProjectId ?? "") : null;
+  } catch {
+    return null;
   }
 }
 

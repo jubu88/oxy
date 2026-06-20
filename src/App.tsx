@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react
 import type { AgentStep } from "../agent/types.ts";
 import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
-import { exportUrl, getProjects, getStatus, previewUrl, runAsk, runBuild, type AskEvent, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
+import { exportUrl, getProjects, getStatus, previewUrl, runAsk, runBuild, saveStitchProjectId, type AskEvent, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
 const NUM_CTX = 16384; // matches the loop's context budget
 
@@ -80,12 +80,25 @@ const projectLabel = (id: string) => id.replace(/-\d{8,}$/, "").replace(/-/g, " 
 // Remember the user's engine/model choice across reloads, so a page refresh doesn't
 // snap them back to the auto-recommended engine (the "I picked ollama but it used
 // llama-server" surprise). Falls back to {} on any storage/parse error.
-function loadPrefs(): { engine?: string; model?: string; baseUrl?: string; useStitch?: boolean; design?: string } {
+type Prefs = { engine?: string; model?: string; baseUrl?: string; useStitch?: boolean; design?: string };
+function loadPrefs(): Prefs {
   try {
     return JSON.parse(localStorage.getItem("oxy.prefs") || "{}") || {};
   } catch {
     return {};
   }
+}
+// Settings are remembered PER PROJECT: "oxy.prefs" is the default (for a new build); each
+// existing project gets its own "oxy.prefs.<id>". Switching projects restores its settings.
+const prefsKey = (id: string) => (id ? `oxy.prefs.${id}` : "oxy.prefs");
+function loadPrefsFor(id: string): Prefs {
+  try {
+    const raw = localStorage.getItem(prefsKey(id));
+    if (raw) return JSON.parse(raw) || loadPrefs();
+  } catch {
+    /* fall through */
+  }
+  return loadPrefs(); // project has no saved settings yet → use the global default
 }
 
 // Read a file's bytes as base64 (no data: prefix).
@@ -194,14 +207,15 @@ export function App() {
     getProjects().then(setProjects);
   }, []);
 
-  // persist the engine/model choice so a reload keeps it (no snap-back to the default)
+  // persist settings for the CURRENT project (or the global default when on a new build),
+  // so a reload keeps them and switching back to this project restores them.
   useEffect(() => {
     try {
-      localStorage.setItem("oxy.prefs", JSON.stringify({ engine, model, baseUrl, useStitch, design: designStyle }));
+      localStorage.setItem(prefsKey(selProject), JSON.stringify({ engine, model, baseUrl, useStitch, design: designStyle }));
     } catch {
       /* storage unavailable — non-fatal */
     }
-  }, [engine, model, baseUrl, useStitch, designStyle]);
+  }, [engine, model, baseUrl, useStitch, designStyle, selProject]);
 
   // 1-second heartbeat so the live "generating…" elapsed timer ticks while building
   useEffect(() => {
@@ -240,6 +254,14 @@ export function App() {
     setSelProject(id);
     setSteps([]);
     setError("");
+    // restore this project's saved settings (engine/model/baseUrl/stitch/design), falling
+    // back to the global default for a project that has none yet.
+    const p = loadPrefsFor(id);
+    if (p.engine) setEngine(p.engine);
+    setModel(p.model || "");
+    if (p.baseUrl) setBaseUrl(p.baseUrl);
+    setUseStitch(!!p.useStitch);
+    setDesignStyle(p.design || "");
     if (id) {
       setProject(id);
       setPreviewKey((k) => k + 1);
@@ -610,6 +632,12 @@ export function App() {
           setBaseUrl={setBaseUrl}
           useStitch={useStitch}
           setUseStitch={setUseStitch}
+          selProject={selProject}
+          stitchProjectId={projects.find((p) => p.id === selProject)?.stitchProjectId || ""}
+          onSaveStitchProjectId={async (id) => {
+            await saveStitchProjectId(selProject, id);
+            setProjects(await getProjects());
+          }}
           tools={status?.tools}
           terminalMode={status?.terminalMode}
           features={status?.features}
