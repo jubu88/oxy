@@ -1,33 +1,49 @@
 # Oxy
 
-**Build web apps with a local LLM. Simple, beautiful, just works.**
+**Build good-looking web apps with a tiny local model — free, private, on the hardware you already have.**
 
-Oxy is a local-first coding tool: describe the app you want, and a model running
-**entirely on your machine** builds it — writing the files, generating images and
-icons, previewing the result, and refining its own design. No cloud account, no
-API keys required, nothing to configure.
+Describe the app you want; a model running **entirely on your machine** builds it —
+writing the files, styling them with a real design system, previewing the result,
+and checking its own work. No cloud account, no API key, nothing to configure.
+
+The headline: it works beautifully with **gemma4 E2B**, a *tiny* (~2B-class) model.
+You do **not** need a big GPU, 32 GB of RAM, or a paid API. On a plain laptop with
+**integrated graphics** (an Intel Iris Xe iGPU), Oxy runs the default model in about
+**5 GB of RAM at ~11 tokens/sec** and turns out a clean little web app in **a minute
+or two** — entirely offline, for free. A bigger model makes bigger apps; the point is
+you don't *need* one to get a genuinely nice result.
 
 > Oxy is the productized descendant of the **Reasoning Lab** research bench, where
 > the orchestration techniques below were discovered and measured. The bench keeps
 > experimenting; proven findings get ported here.
 
-## Why it's different
+## What you can do
 
-The model isn't the product — the **orchestration layer** is. Small local models
-are weak on their own, so Oxy wraps them in techniques that make them punch far
-above their weight:
-
-- **Auto-compact** — when the context fills, Oxy checkpoints the build state to
-  disk and continues from a fresh, small context. Lets a small model build things
-  bigger than its context window, and makes builds resumable after a crash/sleep.
-- **Thinking-burst** — the model reasons hard for exactly one step after a design
-  critique or an error, then goes quiet again (the trace never bloats context).
-- *(porting from the bench)* agreement/best-of-N, fresh-restart escalation, and
-  logprob-confidence routing.
-
-Plus: a **jailed workspace** (the model can only touch its own project folder), a
-**sandboxed preview**, real **SVG icons** and a **design system**, optional local
-**Stable Diffusion** images and **Google Stitch** design.
+- **Build from a prompt.** Type "a tip calculator", "a pomodoro timer", "a tic-tac-toe
+  game" → a working, styled, single-page app you can preview and export.
+- **Pick a design — or let the model choose.** A **design picker** offers **12 design
+  systems**: *modern-saas, warm-artisan, playful, minimal-mono, dark-dashboard,
+  brutalist, glass, editorial, terminal, organic, corporate, vibrant*. Same prompt,
+  very different looks.
+- **Self-learning, gated.** With **auto-learn** on, Oxy reviews every build in the
+  background and — once enough lessons accumulate — automatically promotes an
+  improvement to its own skill, **but only if the change beats a held-out benchmark**.
+  It gets better the more you use it, and can never silently get worse. Toggle it (and
+  whether builds even use the learned skill) in Settings.
+- **Use any model — download it in-app.** Settings has a model picker plus a
+  **Hugging Face browser**: search/curated GGUF list (cached, with a Refresh button),
+  a **Download now** button with live progress, or paste any `hf:repo:quant` ref and
+  Oxy validates it before adding. Models too big for your RAM are filtered out.
+- **Ask mode.** A one-shot **multimodal Q&A** (no build): paste a screenshot, ask a
+  question, get an answer streamed back.
+- **Paste images into the prompt.** Multimodal builds — gemma4 actually *sees* the
+  image you attach (a mockup, a logo, a screenshot to match).
+- **The model checks its own work.** It can **screenshot the live preview** and
+  **interact with the page** (click buttons, type into fields), read the console for
+  errors, and fix what's broken — not just write code blind.
+- **Iterate, don't restart.** Pick an existing project from the switcher and describe
+  a change; the model reads the current files and edits in place.
+- **Export.** One-click **Export .zip** of the generated project.
 
 ## Install & run
 
@@ -36,20 +52,17 @@ npm install
 npm run dev      # open the UI; describe an app and press Build
 ```
 
-On first use Oxy picks the engine that will actually use your GPU. If **Ollama**
-is running *and* would offload to your GPU (NVIDIA/CUDA or Apple/Metal), it uses
-Ollama — instant, nothing to download. But Ollama doesn't use Vulkan, so on a
-**Vulkan-only GPU (e.g. an Intel iGPU)** Ollama would silently run on CPU — there
-Oxy prefers the **managed llama-server**, which reaches your GPU via Vulkan. On
-first use of llama-server Oxy downloads a prebuilt binary (no compiler) and the
-default **gemma4** model, then runs it for you (CUDA/Vulkan/Metal auto-detected,
-else CPU). The picker shows the **active backend** (`VULKAN` / `CUDA` / `CPU`) so
-you're never unknowingly on CPU. Nothing to install manually either way.
+On first use Oxy picks the engine that will actually use your GPU and (for the
+managed engine) downloads a prebuilt `llama-server` binary — no compiler — plus the
+default **gemma4 E2B** model, then runs it for you. CUDA / Vulkan / Metal are
+auto-detected, else it falls back to CPU. The picker shows the **active backend**
+(`VULKAN` / `CUDA` / `CPU`) so you're never unknowingly on CPU. Nothing to install
+manually.
 
 Prefer the terminal? Build headlessly:
 
 ```sh
-npm run oxy      # default: managed llama-server + gemma4
+npm run oxy      # default: managed llama-server + gemma4 E2B
 # OXY_ENGINE=ollama OXY_MODEL=gemma4:e4b OXY_TASK="build a ..." npm run oxy
 ```
 
@@ -59,28 +72,72 @@ npm run oxy      # default: managed llama-server + gemma4
 
 A clean, calm **light** interface — designed in **Google Stitch**
 (`design/stitch-ui.html`, regenerate with `node design/gen-stitch.mjs`) over a
-subtle drifting pastel aurora. It has a prompt box, an engine/model picker, a live
-build timeline that surfaces the orchestration (context-pressure meter,
-`thinking` / `compacted` cues), a sandboxed preview, and one-click **Export .zip**.
+subtle drifting pastel aurora. The **main page** is the build surface: a prompt box,
+the design picker, a live build timeline that surfaces the orchestration
+(per-step + overall timers, live token counter, context-pressure meter,
+`thinking` / `compacted` cues), a sandboxed preview, and Export.
 
-- **Iterate, don't restart.** Pick an existing project from the switcher and
-  describe a change — the model reads the current files and edits in place.
-- **Bring your own keys.** The Settings panel saves your Stitch API key to a
-  git-ignored file (never committed, never sent back to the browser).
+A dedicated **Settings** page holds everything else: engine + model picker, the
+Hugging Face download browser, the improvement-feature toggles (below), per-tool
+switches, and your Stitch key. **Bring your own keys** — the Stitch key is saved to a
+git-ignored file, never committed and never sent back to the browser.
+
+## Why a tiny model works here
+
+The model isn't the product — the **orchestration layer** is. Small local models are
+weak on their own, so Oxy wraps them in techniques that make them punch far above
+their weight. All of these are **toggleable in Settings** (flip one off to A/B it):
+
+- **Auto-learn (gated promote)** — review every build, and after enough lessons
+  accumulate, propose a skill edit, **benchmark it against the current skill, and
+  deploy only on a strict win** (margin + no per-task regression). Self-improving,
+  never degrading.
+- **Use the learned skill** — build with the tuned `skill/system.md`, or flip it off
+  to compare against the built-in baseline prompt.
+- **Auto-compact** — when the context fills, Oxy checkpoints the build state to disk
+  and continues from a fresh, small context. Lets a small model build things bigger
+  than its context window, and makes builds resumable after a crash/sleep.
+- **Thinking-burst / recovery bursts** — the model reasons hard for exactly one step
+  after a design critique or an error, then goes quiet again (the trace never bloats
+  context).
+- **Idle timeout** — abort a generation only after 120 s of *silence*, not on a fixed
+  total cap, so a slow-but-working build finishes instead of reboot-looping.
+- **Downscale attached images** — shrink big screenshots before sending, for far
+  faster vision prefill on an iGPU.
+- **Model-aware server reuse** — restart llama-server when you pick a different model
+  instead of silently serving the old one.
+
+Plus: a **jailed workspace** (the model can only touch its own project folder), a
+**sandboxed preview**, real **SVG icons**, optional local **Stable Diffusion** images
+and **Google Stitch** design.
+
+## Performance (verified)
+
+On a 16 GB laptop with an **Intel Iris Xe iGPU** (integrated graphics, Vulkan), no
+discrete GPU:
+
+| model            | quant            | RAM     | speed         |
+| ---------------- | ---------------- | ------- | ------------- |
+| **gemma4 E2B**   | Q4_K_M + q8_0 KV | ~4.6 GB | ~11.5 tok/s   |
+| gemma4 E4B       | Q4_K_M           | ~7 GB   | ~6.3 tok/s    |
+
+A "hello world" page builds in ~70 s; small interactive apps in a couple of minutes.
+The big wins came from forcing a single full-context slot (`-np 1`), quantizing the
+KV cache (`-ctk/-ctv q8_0`) to stay out of swap, skipping gemma4's default
+thinking, and downscaling vision input — see `skillopt/` and the engine notes.
 
 ## Engines
 
-Inference runs through one `Engine` interface (`engine/engine.ts`) so the agent
-loop is backend-agnostic:
+Inference runs through one `Engine` interface (`engine/engine.ts`) so the agent loop
+is backend-agnostic:
 
 - **`engine/llama-server.ts`** — **the default.** On first use Oxy downloads a
   *prebuilt* `llama-server` from llama.cpp's releases (no compiler) and fetches the
-  GGUF itself (`-hf`, default **gemma4 E4B**), runs it in the background, and drives
-  it via the OpenAI-compatible adapter. You still just `npm run dev` — Oxy manages
-  everything, and **auto-detects your GPU** (NVIDIA→CUDA, else Vulkan, else CPU;
-  macOS→Metal), falling back to CPU if the GPU backend fails. Override with
-  `OXY_LLAMA_VARIANT`. Runs the newest models (e.g. gemma4) by tracking the latest
-  llama.cpp release.
+  GGUF itself (`-hf`, default **gemma4 E2B**), runs it in the background, and drives
+  it via the OpenAI-compatible adapter. **Auto-detects your GPU** (NVIDIA→CUDA, else
+  Vulkan, else CPU; macOS→Metal), falling back to CPU if the GPU backend fails.
+  Override with `OXY_LLAMA_VARIANT`. Tracks the latest llama.cpp release to run new
+  models.
 - **`engine/ollama.ts`** — for people who already run Ollama (instant, reuses your
   pulled models, e.g. `gemma4:e4b`); used automatically when Ollama is detected.
 - **`engine/openai-compat.ts`** — the shared transport under llama-server/Ollama; also
@@ -89,45 +146,52 @@ loop is backend-agnostic:
 
 Oxy prefers Ollama only when it would offload to your GPU (CUDA/Metal); on a
 Vulkan-only machine (e.g. an Intel iGPU) Ollama runs on CPU, so Oxy prefers the
-**managed llama-server** (Vulkan) — and the UI shows which backend is active, so
-you're never silently on CPU. With no Ollama it uses llama-server so a fresh clone
-gets gemma4 with nothing to install. The routing is `engine/gpu.ts`; tool calls
-that small models emit as text are recovered by a known-tool-gated parser
-(`engine/tool-parse.ts`).
+**managed llama-server** (Vulkan) — and the UI shows which backend is active. With no
+Ollama it uses llama-server so a fresh clone gets gemma4 with nothing to install. The
+routing is `engine/gpu.ts`; tool calls that small models emit as text are recovered
+by a known-tool-gated parser (`engine/tool-parse.ts`).
 
 ## Architecture
 
 ```
 agent/      engine-agnostic loop: tools, auto-compact, thinking-burst, token accounting
 engine/     Engine interface + llama-server (managed), ollama, openai-compat adapters
-server/     jailed backend (file tools, preview, SSRF-guarded web, SD, Stitch) —
-            mounted in Vite (codeLabPlugin) or run standalone (serve.mjs)
+server/     jailed backend (file tools, preview, SSRF-guarded web, SD, Stitch,
+            self-check, auto-learn) — mounted in Vite (codeLabPlugin) or run via serve.mjs
 driver/     headless build driver (run-build.ts)
-src/        the React UI (designed in Stitch)
+src/        the React UI (main build page + Settings), designed in Stitch
 design/     the Stitch-generated design reference
 skill/      system.md — the agent "skill" (optimizable prompt) builds read
-skillopt/   self-optimizing-skill loop (SkillOpt-style)
+skillopt/   self-optimizing-skill loop: supervisor (watch) + promote (gated deploy)
 ```
 
 ## Self-optimizing skill (SkillOpt)
 
-The agent's `SYSTEM` prompt lives in `skill/system.md` — a small, inspectable
-"skill" that every build reads. `npm run skillopt` tunes it the way Microsoft's
-[SkillOpt](https://github.com/microsoft/SkillOpt) tunes agent skills: build a set of
-benchmark tasks with the current skill → score each (renders cleanly? required
-elements present? finished?) → a stronger *optimizer* model proposes one focused
-edit → **accept only if the held-out validation score strictly improves** → deploy
-to `skill/system.md`. The model weights never change; only the text does.
+The agent's `SYSTEM` prompt lives in `skill/system.md` — a small, inspectable "skill"
+that every build reads. Oxy improves it two ways, **watch-always, deploy-gated**:
+
+- **Watch (always on by default).** A supervisor reviews each finished build in the
+  background and journals what went well / wrong to `skillopt/journal.jsonl`. Never
+  blocks or affects your build.
+- **Promote (gated).** Turn the journaled lessons into one focused skill edit, then
+  **accept it only if it beats the current skill on a held-out benchmark** (median-of-K
+  validation, a margin, and no per-task regression). The model weights never change;
+  only the text does — and it can never get silently worse.
+
+With **auto-learn** on, the promote runs **automatically** once enough fresh lessons
+accumulate (cadence `OXY_PROMOTE_EVERY`, default 10), in the background, never during
+a build. Or run it by hand:
 
 ```sh
 # optimize on a fast model, deploy the skill (it transfers to the local default)
 OXY_ENGINE=ollama OXY_OPT_MODEL=gpt-oss:120b-cloud npm run skillopt
-OXY_SO_LIMIT=1 OXY_SO_MAXITER=8 npm run skillopt   # quick smoke
+npm run skillopt:promote     # gated deploy from the journaled real-build lessons
 ```
 
-The loop logic and scorer are unit-tested; a full run is slow (it's offline
-"training" — many builds), so optimize on a fast model and let the tuned skill
-transfer to the local model.
+A full offline optimize run is slow (it's "training" — many builds), so optimize on a
+fast model and let the tuned skill transfer to the local model. The loop logic and
+scorer are unit-tested. Disable the whole thing with the Settings toggle or
+`OXY_AUTO_PROMOTE=0` / `OXY_SUPERVISOR=0`.
 
 ## Develop
 
@@ -139,9 +203,9 @@ npm run build    # type-check + production bundle
 
 ## Status
 
-v0.1 — working end to end (build via the UI or `npm run oxy`), verified with a real
-**gemma4** build through the managed **llama-server** (GPU auto-detected, no Ollama,
-no compiler) and via **Ollama**. See [PLAN.md](PLAN.md) for the roadmap and
+v0.1 — working end to end (build via the UI or `npm run oxy`), verified with real
+**gemma4 E2B** builds through the managed **llama-server** (GPU auto-detected, no
+Ollama, no compiler) and via **Ollama**. See [PLAN.md](PLAN.md) for the roadmap and
 [DESIGN.md](DESIGN.md) for where we're headed — generating **backends** with
 small-context models (spec-first, per-file), **mobile** (iOS/Android) targets, and
 the curated-vs-generic **MCP** decision.
@@ -151,8 +215,8 @@ the curated-vs-generic **MCP** decision.
 Oxy is **MIT-licensed** ([LICENSE](LICENSE)) — free to use, modify, and distribute.
 It is provided **"AS IS", with no warranty and no liability**: a local model writes
 files, fetches the web, and (if you enable powerful tools) can run commands. **You
-are solely responsible for what you run and for any consequences.** Treat the
-model's output as untrusted and run Oxy in an isolated environment (a VM, container,
-or other sandbox) — especially before enabling any command/terminal tool, which
-should only be used inside a disposable VM or a gated environment (e.g. Kubernetes).
-Powerful tools are **off by default** and toggled per-tool in Settings.
+are solely responsible for what you run and for any consequences.** Treat the model's
+output as untrusted and run Oxy in an isolated environment (a VM, container, or other
+sandbox) — especially before enabling any command/terminal tool, which should only be
+used inside a disposable VM or a gated environment (e.g. Kubernetes). Powerful tools
+are **off by default** and toggled per-tool in Settings.
