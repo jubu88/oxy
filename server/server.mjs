@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
+import { shouldAutoPromote } from "./auto-promote.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
 // (it hallucinated on test images), so default to a dedicated small VLM. moondream
@@ -67,6 +68,8 @@ const DEFAULT_FEATURES = {
   downscaleImages: true, //   shrink large attached images before sending (client-side)
   idleTimeout: true, //       abort a generate only after 120s idle (vs an old 600s total cap)
   modelAwareReuse: true, //   restart llama-server when a different model is selected
+  useSkill: true, //          build with the learned skill (skill/system.md); OFF = built-in default prompt
+  autoLearn: true, //         watch every build + auto-promote a gated skill improvement (self-learning)
 };
 const FEATURE_KEYS = Object.keys(DEFAULT_FEATURES);
 // Saved llama-server model refs shown in the Settings picker (the user can add any HF
@@ -208,6 +211,61 @@ async function designSystemsList() {
     _designSystems = [];
   }
   return _designSystems;
+}
+
+// ---- auto-promote: after enough journaled builds, run the GATED skill promote in the
+// background — it benchmarks a journal-informed skill edit and deploys it ONLY if it beats
+// the current skill (margin + no per-task regression), so the skill self-improves but can
+// never silently degrade. Guarded: never while a build is active, never two at once.
+// Off with OXY_AUTO_PROMOTE=0; cadence OXY_PROMOTE_EVERY (default 10).
+let promoteRunning = false;
+let activeBuilds = 0;
+function maybeAutoPromote(fresh) {
+  const every = Number(process.env.OXY_PROMOTE_EVERY) || 10;
+  if (!shouldAutoPromote({ fresh, every, promoteRunning, activeBuilds, disabled: process.env.OXY_AUTO_PROMOTE === "0" })) return;
+  promoteRunning = true;
+  let model = "";
+  try {
+    model = readSettings().llamaModels[0] || "";
+  } catch {}
+  const logPath = path.join(OXY_HOME, "auto-promote.log");
+  let out = "ignore";
+  try {
+    fs.mkdirSync(OXY_HOME, { recursive: true });
+    out = fs.openSync(logPath, "a");
+  } catch {}
+  console.log(`[oxy] auto-promote: ${fresh} journaled builds ≥ ${every} — running a GATED skill review in the background (benchmark-validated). Log: ${logPath}`);
+  try {
+    const child = spawn(process.execPath, [path.join(ROOT, "skillopt", "promote.ts")], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        OXY_ENGINE: "llama-server",
+        OXY_MODEL: model || "hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M",
+        OXY_OPT_MODEL: process.env.OXY_OPT_MODEL || "gpt-oss:120b-cloud",
+        // gate on a COMBINED easy+hard benchmark: the easy set alone is saturated (~0.93)
+        // and can't tell a good skill from a verbose one — measured, the model regressed on
+        // hard tasks under a longer skill. The hard tasks give the gate real headroom.
+        OXY_SO_TASKS: process.env.OXY_SO_TASKS || "skillopt/tasks-all.json",
+        OXY_SO_VAL_REPEATS: process.env.OXY_SO_VAL_REPEATS || "1", // 10 diverse tasks > more repeats for catching regressions on a slow iGPU
+        OXY_SUPERVISOR: "0", // the promote spawns its own backend; never let it journal/auto-promote recursively
+        OXY_AUTO_PROMOTE: "0",
+      },
+      stdio: ["ignore", out, out],
+      windowsHide: true,
+    });
+    child.on("exit", (code) => {
+      promoteRunning = false;
+      console.log(`[oxy] auto-promote finished (exit ${code}) — see ${logPath}`);
+    });
+    child.on("error", (e) => {
+      promoteRunning = false;
+      console.warn(`[oxy] auto-promote could not start: ${String(e?.message ?? e)}`);
+    });
+  } catch (e) {
+    promoteRunning = false;
+    console.warn(`[oxy] auto-promote could not start: ${String(e?.message ?? e)}`);
+  }
 }
 
 const MAX_FILE_BYTES = 512 * 1024;
@@ -911,6 +969,7 @@ export async function codelabHandler(req, res, next) {
       };
       const ac = new AbortController();
       req.on("close", () => ac.abort());
+      activeBuilds++; // so auto-promote never kicks off a heavy benchmark mid-build
       try {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
@@ -925,9 +984,10 @@ export async function codelabHandler(req, res, next) {
         if (!project) project = await createProject(task.slice(0, 40), baseUrl);
         send({ type: "project", project, iterate });
         const executor = new HttpToolExecutor({ baseUrl });
-        // use the deployed (e.g. SkillOpt-tuned) skill if present
+        // use the deployed (e.g. SkillOpt-tuned) skill if present — unless the user
+        // turned skills off in Settings (then the loop's built-in default prompt is used).
         const skillPath = path.resolve(ROOT, "skill", "system.md");
-        const systemOverride = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
+        const systemOverride = features.useSkill !== false && fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
         // multimodal attachments (images/audio) from the client — validate the shape
         const attachments = Array.isArray(body.attachments)
           ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
@@ -978,10 +1038,11 @@ export async function codelabHandler(req, res, next) {
         send({ type: "done", project });
         // continuous improvement: review THIS build in the background (best-effort,
         // never blocks the response). watch-always; deploy stays gated (promote.ts).
-        if (process.env.OXY_SUPERVISOR !== "0" && !ac.signal.aborted) {
+        // Gated by the Settings "auto-learn" toggle (and the OXY_SUPERVISOR kill-switch).
+        if (features.autoLearn !== false && process.env.OXY_SUPERVISOR !== "0" && !ac.signal.aborted) {
           (async () => {
             try {
-              const { reviewBuild } = await import("../skillopt/supervisor.ts");
+              const { reviewBuild, unconsumedCount } = await import("../skillopt/supervisor.ts");
               const { OllamaEngine } = await import("../engine/ollama.ts");
               const sup = new OllamaEngine({ model: process.env.OXY_SUPERVISOR_MODEL || process.env.OXY_OPT_MODEL || "gpt-oss:120b-cloud" });
               await sup.ensureReady();
@@ -990,6 +1051,8 @@ export async function codelabHandler(req, res, next) {
                 fileCount = fs.readdirSync(path.join(PROJECTS, project)).filter((f) => !f.startsWith(".codelab")).length;
               } catch {}
               await reviewBuild({ task, project, toolLog, finished, errors: [], fileCount, iterate }, sup, systemOverride ?? "");
+              // enough fresh lessons banked → self-improve: run the GATED promote (above).
+              maybeAutoPromote(unconsumedCount());
             } catch {
               /* supervisor is best-effort; never affects the build */
             }
@@ -998,6 +1061,7 @@ export async function codelabHandler(req, res, next) {
       } catch (e) {
         send({ type: "error", message: String(e?.message ?? e) });
       } finally {
+        activeBuilds = Math.max(0, activeBuilds - 1);
         res.end();
       }
       return;

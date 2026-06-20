@@ -1,0 +1,304 @@
+{
+  "_comment": "easy val + hard val, combined — used to gate skill changes on both regression-safety (easy) and headroom (hard)",
+  "val": [
+    {
+      "id": "calculator",
+      "prompt": "Build a simple calculator: a display and number/operator buttons that compute results in vanilla JavaScript. Single index.html. Then call done.",
+      "checks": {
+        "selectors": [
+          "button"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "7"
+              },
+              {
+                "clickText": "+"
+              },
+              {
+                "clickText": "3"
+              },
+              {
+                "clickText": "="
+              }
+            ],
+            "expect": [
+              {
+                "contains": "10",
+                "label": "computing 7 + 3 = shows 10"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "clock",
+      "prompt": "Build a live digital clock, centered, that updates every second with vanilla JavaScript and shows the current time. Single index.html. Then call done.",
+      "checks": {
+        "textIncludes": [
+          ":"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "waitMs": 1200
+              }
+            ],
+            "expect": [
+              {
+                "changed": true,
+                "label": "the displayed time advances every second"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "profile",
+      "prompt": "Build a profile card: a circular avatar, a name, a short bio line, and a 'Follow' button. Single index.html. Then call done.",
+      "checks": {
+        "selectors": [
+          "button"
+        ],
+        "textIncludes": [
+          "follow"
+        ]
+      }
+    },
+    {
+      "id": "tabs",
+      "prompt": "Build a tabbed panel: three tabs labeled 'Overview', 'Features', and 'Pricing', and below them a content area that shows ONLY the selected tab's paragraph. Clicking a tab reveals its panel and hides the others (vanilla JavaScript). Single index.html. Then call done.",
+      "checks": {
+        "selectors": [
+          "button, [role=tab], a"
+        ],
+        "textIncludes": [
+          "overview",
+          "features",
+          "pricing"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "Pricing"
+              }
+            ],
+            "expect": [
+              {
+                "changed": true,
+                "label": "clicking Pricing changes the visible panel content"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "charcount",
+      "prompt": "Build a text box with a live character counter below it that shows how many characters have been typed and updates as you type (vanilla JavaScript). Single index.html. Then call done.",
+      "checks": {
+        "selectors": [
+          "input, textarea"
+        ],
+        "textIncludes": [
+          "character"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "fill": {
+                  "selector": "input, textarea",
+                  "value": "hello"
+                }
+              }
+            ],
+            "expect": [
+              {
+                "contains": "5",
+                "label": "typing 5 characters shows the count 5"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "calc-precedence",
+      "prompt": "Build a calculator in a single index.html with vanilla JS: digit buttons and operator buttons +, −, ×, ÷ that respect operator PRECEDENCE (multiply and divide bind tighter than add and subtract), plus = and Clear. So 2 + 3 × 4 = must give 14, not 20. Then call done.",
+      "checks": {
+        "selectors": [
+          "button"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "2"
+              },
+              {
+                "clickText": "+"
+              },
+              {
+                "clickText": "3"
+              },
+              {
+                "clickText": "×"
+              },
+              {
+                "clickText": "4"
+              },
+              {
+                "clickText": "="
+              }
+            ],
+            "expect": [
+              {
+                "contains": "14",
+                "label": "2 + 3 × 4 = 14 (precedence, not 20)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "todomvc",
+      "prompt": "Build a to-do app in a single index.html with vanilla JS: a text input + Add button; each item has a checkbox to complete it and a delete button; and filter buttons 'All', 'Active', 'Completed' that show only the matching items. Then call done.",
+      "checks": {
+        "selectors": [
+          "input",
+          "button"
+        ],
+        "textIncludes": [
+          "all",
+          "active",
+          "completed"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "fill": {
+                  "selector": "input",
+                  "value": "Apple"
+                }
+              },
+              {
+                "clickText": "Add"
+              },
+              {
+                "fill": {
+                  "selector": "input",
+                  "value": "Banana"
+                }
+              },
+              {
+                "clickText": "Add"
+              },
+              {
+                "clickText": "Completed"
+              }
+            ],
+            "expect": [
+              {
+                "changed": true,
+                "label": "the Completed filter hides the active items"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "data-sort",
+      "prompt": "Build a sortable table in a single index.html with vanilla JS: a table of three people — Charlie 30, Alice 50, Bob 10 (columns: name, score) — and a 'Sort by score' button that reorders the rows ascending by score. Then call done.",
+      "checks": {
+        "selectors": [
+          "table, tbody",
+          "button"
+        ],
+        "textIncludes": [
+          "charlie",
+          "alice",
+          "bob"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "Sort"
+              }
+            ],
+            "expect": [
+              {
+                "changed": true,
+                "label": "Sort reorders the table rows"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "quiz",
+      "prompt": "Build a 3-question multiple-choice quiz in a single index.html with vanilla JS. Each question has selectable options, and a Submit button at the end shows the score formatted as N/3. Then call done.",
+      "checks": {
+        "selectors": [
+          "button"
+        ],
+        "textIncludes": [
+          "?"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "Submit"
+              }
+            ],
+            "expect": [
+              {
+                "contains": "/3",
+                "label": "Submit shows a score out of 3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "pagination",
+      "prompt": "Build a paginated list in a single index.html with vanilla JS: 12 numbered items shown 5 per page, with Prev and Next buttons and a 'Page X of 3' indicator that updates. Then call done.",
+      "checks": {
+        "selectors": [
+          "button"
+        ],
+        "textIncludes": [
+          "page"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "Next"
+              }
+            ],
+            "expect": [
+              {
+                "changed": true,
+                "label": "Next advances to the next page of items"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

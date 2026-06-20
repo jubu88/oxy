@@ -12,6 +12,8 @@ const SAFE_TOOLS: Array<{ key: string; label: string; hint: string }> = [
 // The toggleable "improvement" features — flip any off to A/B test it. `def` mirrors the
 // server's DEFAULT_FEATURES so the toggle shows the right state before status loads.
 const FEATURE_CATALOG: Array<{ key: string; def: boolean; label: string; hint: string }> = [
+  { key: "autoLearn", def: true, label: "Auto-learn from builds", hint: "review every build in the background and, after enough have accumulated, auto-promote a skill improvement — but only if it beats the benchmark (gated, never degrades). Self-improving." },
+  { key: "useSkill", def: true, label: "Use the learned skill", hint: "build with the tuned skill in skill/system.md. OFF = use the built-in default prompt (handy to A/B the learned skill against baseline)" },
   { key: "thinking", def: false, label: "Model thinking", hint: "reason each turn before acting — slower, can help hard logic. OFF = straight to building (recommended; gemma4 over-thinks)" },
   { key: "downscaleImages", def: true, label: "Downscale attached images", hint: "shrink big screenshots before sending — far faster vision prefill on an iGPU" },
   { key: "idleTimeout", def: true, label: "Idle generate timeout", hint: "abort only after 120s of silence, not a 600s total cap — lets a slow-but-working build finish instead of reboot-looping" },
