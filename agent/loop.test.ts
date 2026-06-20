@@ -131,6 +131,27 @@ test("runs tools in order and stops on done", async () => {
   assert.equal(engine.callIndex, 5); // stopped right after done — no 6th turn
 });
 
+test("recovers a coder model's ```html code block as a write_file (adapter)", async () => {
+  const engine = new FakeEngine([
+    { content: "Here is the page:\n```html\n<!DOCTYPE html><html><body><h1>Bank</h1></body></html>\n```" }, // code, no tool call
+    { toolCalls: [tc("done", { summary: "ok" })] },
+  ]);
+  const executor = new FakeExecutor();
+  await runAgent(baseConfig(), { engine, executor, onStep: () => {} });
+  const write = executor.calls.find((c) => c.name === "write_file");
+  assert.ok(write, "the ```html block should have been recovered as a write_file");
+  assert.equal(write!.args.path, "index.html");
+  assert.match(write!.args.content, /<!DOCTYPE html>/);
+});
+
+test("stops early after 3 dead turns with no tool call (weak model can't drive the loop)", async () => {
+  const engine = new FakeEngine([{ content: "I will plan my approach carefully." }]); // never a tool call, no code
+  const notices: string[] = [];
+  await runAgent(baseConfig({ maxIterations: 20 }), { engine, executor: new FakeExecutor(), onStep: () => {}, onNotice: (m) => notices.push(m) });
+  assert.equal(engine.callIndex, 3, "should give up at 3 dead turns, not run all 20");
+  assert.ok(notices.some((n) => /no tool calls/i.test(n)), "should surface why it stopped");
+});
+
 test("respects maxIterations when the model never calls done", async () => {
   const engine = new FakeEngine([{ toolCalls: [tc("write_file", { path: "index.html", content: "x" })] }]);
   const steps: AgentStep[] = [];

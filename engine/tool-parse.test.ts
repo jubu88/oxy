@@ -1,7 +1,7 @@
 // Tests for the engine-agnostic tool-call/reasoning parsers. node --test.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTextToolCalls, splitReasoning } from "./tool-parse.ts";
+import { codeBlocksToWrites, parseTextToolCalls, splitReasoning } from "./tool-parse.ts";
 
 const KNOWN = new Set(["get_design_system", "write_file", "done", "get_icon"]);
 
@@ -28,6 +28,37 @@ test("parseTextToolCalls keeps prose and strips only the call block", () => {
 test("parseTextToolCalls ignores JSON that isn't a known tool (no false positives)", () => {
   assert.deepEqual(parseTextToolCalls('```json\n{"name":"Stillness","theme":"dark"}\n```', KNOWN).toolCalls, []);
   assert.deepEqual(parseTextToolCalls('{"title":"my app","version":1}', KNOWN).toolCalls, []);
+});
+
+test("codeBlocksToWrites recovers a ```html block as write_file index.html (the coder-model case)", () => {
+  const content = "Here's the page:\n```html\n<!DOCTYPE html><html><body><h1>Bank</h1></body></html>\n```";
+  const r = codeBlocksToWrites(content, KNOWN);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, "write_file");
+  assert.equal(r[0].arguments.path, "index.html");
+  assert.match(r[0].arguments.content, /<!DOCTYPE html>/);
+});
+
+test("codeBlocksToWrites recovers html + css + js as three writes", () => {
+  const content = "```html\n<!DOCTYPE html><html><body>hello there friend</body></html>\n```\n```css\nbody { margin: 0; padding: 0; color: red; }\n```\n```js\nconsole.log('hello world from the app');\n```";
+  const paths = codeBlocksToWrites(content, KNOWN).map((c) => c.arguments.path).sort();
+  assert.deepEqual(paths, ["app.js", "index.html", "style.css"]);
+});
+
+test("codeBlocksToWrites takes the LONGEST block per language", () => {
+  const content = "```html\n<a>short but over forty chars long here padding</a>\n```\n```html\n<b>this one is clearly the much much longer html block to keep</b>\n```";
+  const r = codeBlocksToWrites(content, KNOWN);
+  assert.equal(r.length, 1);
+  assert.match(r[0].arguments.content, /much much longer/);
+});
+
+test("codeBlocksToWrites ignores tiny snippets and unknown languages", () => {
+  assert.deepEqual(codeBlocksToWrites("```html\n<br>\n```", KNOWN), []); // too short
+  assert.deepEqual(codeBlocksToWrites("```python\nprint('this is a long enough python snippet to pass')\n```", KNOWN), []); // unmapped lang
+});
+
+test("codeBlocksToWrites is a no-op when write_file isn't a known tool", () => {
+  assert.deepEqual(codeBlocksToWrites("```html\n<!DOCTYPE html><html><body>plenty of content here</body></html>\n```", new Set(["done"])), []);
 });
 
 test("splitReasoning extracts <think> into a separate channel", () => {

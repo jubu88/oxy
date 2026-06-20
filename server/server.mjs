@@ -1098,6 +1098,10 @@ export async function codelabHandler(req, res, next) {
         // links to files that don't exist) so the user knows what one more iterate would fix.
         const verifyIssues = verifyProject(path.join(PROJECTS, project));
         if (verifyIssues.length) send({ type: "status", message: `verify: ${verifyIssues.length} issue(s) to fix — ${verifyIssues.slice(0, 3).join(" · ")}` });
+        // the entry page is the one thing an app can't render without — call it out clearly
+        // (slow models sometimes write style.css/app.js but run out before index.html).
+        if (!ac.signal.aborted && !fs.existsSync(path.join(PROJECTS, project, "index.html")))
+          send({ type: "status", message: "⚠ no index.html was produced — the app has no entry page and won't render; iterate to have the model create index.html" });
         send({ type: "done", project });
         // continuous improvement: review THIS build in the background (best-effort,
         // never blocks the response). watch-always; deploy stays gated (promote.ts).

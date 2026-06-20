@@ -52,6 +52,38 @@ export function parseTextToolCalls(content: string, names: Set<string>): { toolC
   return { toolCalls: calls, content: cleaned.trim() };
 }
 
+const FILE_FOR_LANG: Record<string, string> = {
+  html: "index.html",
+  htm: "index.html",
+  css: "style.css",
+  js: "app.js",
+  javascript: "app.js",
+  mjs: "app.js",
+};
+
+/**
+ * Recover a CODER model's output as file writes. Code-completion models (e.g.
+ * Qwen2.5-Coder) often emit the app as fenced ```html/```css/```js blocks instead of
+ * calling write_file — so the build loop sees "no tool call" and writes nothing. This
+ * turns the LONGEST block per language into a write_file call (html→index.html,
+ * css→style.css, js→app.js). Gated to when write_file is a known tool, and intended as
+ * a FALLBACK only when no real tool call was made (models that tool-call never hit it).
+ */
+export function codeBlocksToWrites(content: string, names: Set<string>): ToolCall[] {
+  if (!content || !names.has("write_file")) return [];
+  const re = /```([a-zA-Z]+)?[ \t]*\r?\n?([\s\S]*?)```/g;
+  const best = new Map<string, string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    const file = FILE_FOR_LANG[(m[1] ?? "").toLowerCase()];
+    if (!file) continue;
+    const body = (m[2] ?? "").trim();
+    if (body.length < 40) continue; // skip tiny snippets / inline examples
+    if (!best.has(file) || body.length > (best.get(file) as string).length) best.set(file, body);
+  }
+  return [...best.entries()].map(([path, body]) => ({ name: "write_file", arguments: { path, content: body } }));
+}
+
 /** Split a reasoning model's <think>…</think> trace out of the visible content. */
 export function splitReasoning(text: string): { content: string; thinking?: string } {
   const m = text.match(/<think>([\s\S]*?)<\/think>/i);

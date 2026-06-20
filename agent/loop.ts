@@ -20,6 +20,7 @@
 import type { Engine, ChatMessage, GenerateResult } from "../engine/engine.ts";
 import type { AgentConfig, AgentProgress, AgentStep, Checkpoint, FileEntry, ToolCallRecord, ToolExecutor } from "./types.ts";
 import { buildSystem, buildTools } from "./tools.ts";
+import { codeBlocksToWrites } from "../engine/tool-parse.ts";
 import { CHECKPOINT_FILE, COMPACT_TRIGGER, estTokens, MAX_COMPACTIONS, resumePrompt, SEED_CEILING } from "./compaction.ts";
 
 // Generous generation budget: a full inline page can exceed 4096 tokens and
@@ -46,6 +47,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   const ctx = { project: config.project };
 
   const tools = buildTools({ useStitch: config.useStitch, enabled: config.enabledTools });
+  const toolNames = new Set(tools.map((t) => t.name)); // for recovering coder-style code blocks as writes
   const system = buildSystem(config.useStitch, config.systemOverride);
 
   // The user pre-picked a design system? Fetch its tokens now and inject them so the
@@ -148,6 +150,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     return true;
   }
 
+  let consecutiveNoAction = 0; // give up if a weak model can't emit tool calls turn after turn
   for (let i = 0; i < config.maxIterations; i++) {
     if (signal?.aborted) return;
     const ranWithThink = thinkNext; // freeze the one-shot burst flag for this turn
@@ -184,7 +187,15 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
 
     const content = result.content ?? "";
     const thinking = result.thinking ?? "";
-    const rawToolCalls = result.toolCalls ?? [];
+    let rawToolCalls = result.toolCalls ?? [];
+    // Coder models (e.g. Qwen2.5-Coder) often emit the app as ```html/```css/```js blocks
+    // instead of calling write_file, so the loop would see "no action" and write nothing.
+    // Recover those blocks as write_file calls. No-op for models that tool-call correctly
+    // (they don't reach here with an empty toolCalls list).
+    if (!rawToolCalls.length) {
+      const recovered = codeBlocksToWrites(content, toolNames);
+      if (recovered.length) rawToolCalls = recovered;
+    }
     const evalCount = result.evalTokens;
     const promptEvalCount = result.promptTokens; // exact prefill the engine processed this turn
     const truncated = !!result.truncated;
@@ -282,7 +293,15 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     // whose seed already directs the next steps). If the model rambled in prose
     // instead of calling a tool (common with weak local models), push back hard and
     // arm a reasoning burst to help it produce a real call.
-    if (!rawToolCalls.length && !compacted) {
+    if (rawToolCalls.length) {
+      consecutiveNoAction = 0;
+    } else if (!compacted) {
+      // give up if the model produces no tool call several turns running (a weak model
+      // that can't drive the loop) instead of burning the whole step budget on dead turns.
+      if (++consecutiveNoAction >= 3) {
+        onNotice?.("stopped: the model produced no tool calls for 3 turns running — it can't drive this build. Try a different model.");
+        return;
+      }
       const rambled = content.trim().length > 40;
       messages.push({
         role: "user",
