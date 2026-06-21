@@ -1170,7 +1170,10 @@ export async function codelabHandler(req, res, next) {
           {
             task,
             project,
-            maxIterations: Number(body.maxIterations) || maxStepsFor(activeModel),
+            // library apps (Supabase/React/web-components) legitimately need more turns —
+            // several get_reference calls + backend files (schema.sql, edge fns) + the frontend
+            // + checks — so give them headroom beyond the plain-static budget.
+            maxIterations: Number(body.maxIterations) || maxStepsFor(activeModel) + (refHint ? 8 : 0),
             temperature: Number(body.temperature) || 0.6,
             useStitch,
             designStyle: typeof body.design === "string" ? body.design : "",
