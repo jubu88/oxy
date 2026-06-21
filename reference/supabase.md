@@ -5,15 +5,20 @@ project URL + anon (public) key. Row Level Security protects the data, so the an
 safe to ship. Edge functions / SQL are files you generate for the user to deploy.
 
 ## setup
-Load the client from a CDN and create it once (module scope). Never hardcode a secret —
-the anon key is public and gated by RLS.
+CRITICAL: your app JS must be a **module** — `import` and top-level `await` only work in
+modules. In index.html, load app.js with `type="module"` (NOT a classic `<script>`, which
+throws "await is only valid in async functions and the top level bodies of modules").
 ```html
-<script type="module">
+<!-- index.html -->
+<script type="module" src="app.js"></script>
+```
+```js
+// app.js — a module, so import + top-level await are valid here
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
-const SUPABASE_ANON_KEY = "YOUR-ANON-KEY"; // public, RLS-protected
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-</script>
+const SUPABASE_ANON_KEY = "YOUR-ANON-KEY"; // public, gated by RLS
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const { data: { session } } = await supabase.auth.getSession(); // top-level await OK in a module
 ```
 
 ## auth

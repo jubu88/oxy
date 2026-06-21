@@ -10,7 +10,8 @@ import path from "node:path";
 // library key -> the runtime note prepended so the model targets Oxy's no-build static
 // iframe (CDN deps, no bundler) rather than a toolchain it can't run here.
 export const REFERENCE_LIBRARIES = {
-  supabase: "Supabase from the browser via the CDN client (no backend server needed for the frontend).",
+  supabase:
+    "Supabase runs from the browser via the CDN client. CRITICAL: put your app JS in a MODULE — load it as <script type=\"module\" src=\"app.js\"></script> (never a classic <script>), because `import` and top-level `await` only work in modules. A classic script throws 'await is only valid in async functions and the top level bodies of modules'.",
   "web-components": "Native Web Components — no build step, runs as-is.",
   react: "React as a no-build SPA: React + ReactDOM + Babel from a CDN, JSX in <script type=\"text/babel\">. Oxy has no bundler, so do NOT use import/JSX files or a Vite/npm setup.",
 };
