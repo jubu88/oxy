@@ -95,11 +95,19 @@ export class HttpToolExecutor implements ToolExecutor {
       }
       if (name === "design_with_stitch") {
         const r = await (
-          await fetch(`${api}/design-stitch`, post({ project, path: args.path, prompt: args.prompt, deviceType: args.deviceType }))
+          await fetch(`${api}/design-stitch`, post({ project, path: args.path, prompt: args.prompt, deviceType: args.deviceType, newScreen: args.newScreen }))
         ).json();
-        return r.ok
-          ? `Stitch designed and saved ${r.path} (${r.bytes} bytes, ${r.seconds}s). Preview of the start of the page:\n${r.preview}\n…\nThe page is written. Do NOT write_file ${r.path} again — instead call review_design, then refine with edit_file if needed, then done.`
-          : `error: ${r.error}`;
+        if (!r.ok) return `error: ${r.error}`;
+        const others = (r.screens ?? []).filter((t: string) => t && t !== r.screenTitle);
+        const how = r.reused
+          ? `Reused your EXISTING Stitch design${r.screenTitle ? ` "${r.screenTitle}"` : ""} and saved it to ${r.path} (${r.bytes} bytes, ${r.seconds}s) — no regeneration, the design is used as-is.` +
+            (others.length ? ` This Stitch project also has these screens you can pull into other files by naming one in the prompt (e.g. a different path): ${others.join(", ")}.` : "")
+          : `Stitch generated and saved ${r.path} (${r.bytes} bytes, ${r.seconds}s).`;
+        return (
+          `${how}\nPreview of the start of the page:\n${r.preview}\n…\n` +
+          `The page is written. Do NOT write_file ${r.path} again — call review_design, then refine with edit_file if needed, then done. ` +
+          `Only set newScreen:true if you need Stitch to design a BRAND-NEW page that doesn't exist in this project yet.`
+        );
       }
       if (name === "generate_image") {
         const r = await (

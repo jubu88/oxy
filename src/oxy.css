@@ -1037,3 +1037,226 @@ body {
   border-radius: 999px;
   transition: width 0.3s ease;
 }
+
+/* ---- auto-learn (continuous improvement) indicator ---- */
+.autolearn {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--outline-variant) 30%, transparent);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow);
+  padding: 10px 14px;
+  margin-bottom: 4px;
+}
+.autolearn.running {
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  box-shadow: var(--shadow-glow);
+}
+.al-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+}
+.al-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--outline-variant);
+  flex: none;
+}
+.al-dot.on {
+  background: var(--primary);
+  animation: al-pulse 1.4s ease-in-out infinite;
+}
+@keyframes al-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+.al-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.al-state {
+  font-size: 12px;
+  color: var(--primary);
+}
+.al-state.muted {
+  color: var(--muted);
+}
+.al-spacer {
+  flex: 1;
+}
+.al-timer {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--outline);
+}
+.al-caret {
+  font-size: 18px;
+  color: var(--outline);
+}
+.al-prog {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.al-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-container);
+  overflow: hidden;
+}
+.al-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.al-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.al-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.al-score b {
+  font-family: var(--mono);
+  color: var(--text);
+}
+.al-score b.up {
+  color: #1a7f37;
+}
+.al-score b.down {
+  color: var(--error);
+}
+.al-score.muted {
+  color: var(--outline);
+}
+.al-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 25%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.al-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.al-learned-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--outline);
+  margin-bottom: 5px;
+}
+.al-learned ul {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.al-learned li {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.al-x {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--primary);
+  margin-right: 4px;
+}
+.al-task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 14px;
+}
+.al-task {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.al-task code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.al-task b.up {
+  color: #1a7f37;
+}
+.al-task b.down {
+  color: var(--error);
+}
+
+/* ---- "what changed this run" summary ---- */
+.changes .changes-summary {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+.changes-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.changes-row code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-low);
+  border-radius: 6px;
+  padding: 2px 7px;
+  color: var(--text);
+}
+.changes-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.changes-tag.new {
+  background: rgba(26, 127, 55, 0.1);
+  color: #1a7f37;
+}
+.changes-tag.edit {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+.changes-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--tertiary);
+}

@@ -17,6 +17,19 @@ you don't *need* one to get a genuinely nice result.
 > the orchestration techniques below were discovered and measured. The bench keeps
 > experimenting; proven findings get ported here.
 
+## The goal
+
+Big models don't fit on a laptop like this — a 7B crawls and a 12B barely runs (see
+[Performance](#performance-verified)). So Oxy's mission is the opposite of "just use a
+bigger model": make the **smallest capable model** — **gemma4 E2B** (or **E4B** for
+harder work) — a genuine **expert at building web apps**, by wrapping it in
+orchestration and a skill that keeps improving from real use.
+
+**Web is the focus today.** The same machinery is meant to extend later to other
+targets (**Android / iOS**), each with its **own skill file** and a web/android/ios
+selector in the UI — though native mobile on a ~2B model is an open question, not a
+promise. See [Roadmap](#roadmap).
+
 ## What you can do
 
 - **Build from a prompt.** Type "a tip calculator", "a pomodoro timer", "a tic-tac-toe
@@ -178,9 +191,26 @@ that every build reads. Oxy improves it two ways, **watch-always, deploy-gated**
   validation, a margin, and no per-task regression). The model weights never change;
   only the text does — and it can never get silently worse.
 
-With **auto-learn** on, the promote runs **automatically** once enough fresh lessons
-accumulate (cadence `OXY_PROMOTE_EVERY`, default 10), in the background, never during
-a build. Or run it by hand:
+So the full loop is: **you build → a supervisor journals one lesson per build →** once
+**`OXY_PROMOTE_EVERY`** (default 10) fresh lessons pile up, **a gated promote runs in
+the background:** it benchmarks the current skill, asks a strong optimizer for one
+journal-informed edit, benchmarks that candidate, and **deploys it only on a strict
+win.** The **Auto-learn panel** in the UI makes this visible — it shows when a promote
+is running, its progress + timer, the current-vs-candidate scores, the pass/fail
+outcome, and the lessons mined from your builds, so the self-improvement isn't a black
+box. The promote runs in the background, never during a build, on a separate model
+port so it won't disturb a build you're running.
+
+> **Skills are tuned for gemma4 E2B.** The benchmark gate runs every candidate on the
+> **default model (gemma4 E2B)** — so a deployed skill is one *measured* to help **that**
+> model. In principle a better prompt helps any model, but Oxy can't run the benchmark
+> on every model you might pick, so on **other models a learned skill is unverified**: it
+> may help, or occasionally hurt. Flip **Use the learned skill** off in Settings to fall
+> back to the neutral built-in prompt on a model you haven't validated. (Note too: a ~2B
+> model degrades with a longer prompt, so the skill is deliberately kept *lean* — more
+> rules dilute its attention.)
+
+Or run the promote by hand:
 
 ```sh
 # optimize on a fast model, deploy the skill (it transfers to the local default)
@@ -201,14 +231,35 @@ npm run typecheck
 npm run build    # type-check + production bundle
 ```
 
+## Roadmap
+
+Oxy is still early; the throughline is **deepening the small model's web expertise**
+before widening scope.
+
+- **RAG for real backends (next).** Retrieval-augmented generation so the model can
+  write **Supabase** edge functions, SQL schemas, and DB queries correctly — pulling the
+  exact API/usage it needs into context instead of guessing. This fits Oxy's model
+  perfectly: the frontend stays static and calls the cloud backend, so there's still no
+  local build step. Because a ~2B model degrades with a longer prompt, retrieval must be
+  **surgical** — inject only the few snippets that matter, never dump docs.
+- **More frontend libraries — selectively.** **Web Components** are a cheap, native fit
+  (no build step) and a good RAG target. **React / Next are deferred:** they need a
+  bundler/SSR runtime Oxy doesn't have, so there the bottleneck is the *runtime*, not the
+  model's knowledge — RAG alone wouldn't unlock them. (If ever: client-only Vite + React
+  long before Next.)
+- **Other platforms (later, aspirational).** Android (Kotlin Compose) / iOS (Swift)
+  would each get their **own skill file** and benchmark, picked via a web/android/ios
+  selector in the UI. Native mobile on a tiny local model is an open question — kept in
+  mind, not promised. Web stays the focus.
+
+See [PLAN.md](PLAN.md) and [DESIGN.md](DESIGN.md) for deeper notes.
+
 ## Status
 
 v0.1 — working end to end (build via the UI or `npm run oxy`), verified with real
 **gemma4 E2B** builds through the managed **llama-server** (GPU auto-detected, no
-Ollama, no compiler) and via **Ollama**. See [PLAN.md](PLAN.md) for the roadmap and
-[DESIGN.md](DESIGN.md) for where we're headed — generating **backends** with
-small-context models (spec-first, per-file), **mobile** (iOS/Android) targets, and
-the curated-vs-generic **MCP** decision.
+Ollama, no compiler) and via **Ollama**. Where it's headed next is the
+[Roadmap](#roadmap) above.
 
 ## Safety & license
 

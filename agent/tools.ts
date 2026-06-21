@@ -106,13 +106,14 @@ export const TOOLS: ToolDef[] = [
   {
     name: "design_with_stitch",
     description:
-      "Generate a polished, complete HTML page from a detailed text description using Google Stitch (a professional cloud AI UI designer), and save it directly into the project (default index.html). Use this for a complex or especially polished page when you want better design than you can hand-write. Describe the page fully (sections, content, intended style). It RETURNS a preview and WRITES the file for you, so do not also write_file index.html afterward — instead review_design and refine with edit_file. NOTE: SLOW (1-3 minutes) and CLOUD-based — your prompt is sent to Google (not local).",
+      "Get a polished, complete HTML page from Google Stitch (a professional cloud AI UI designer) and save it directly into the project (default index.html). If this project already has a Stitch design, this REUSES the existing screen that best matches your prompt — instant, exact, and free of regeneration (so describe WHICH screen you want, e.g. 'dashboard' or 'settings', to pull that one). Only when nothing matches, or you set newScreen:true, does it generate a fresh page (SLOW, 1-3 min, cloud — your prompt goes to Google). It WRITES the file for you, so do NOT also write_file that path — review_design and refine with edit_file instead. To assemble a multi-screen app, call this once per screen with a distinct path (e.g. path:'payments.html', prompt:'payments screen').",
     parameters: {
       type: "object",
       properties: {
-        prompt: { type: "string", description: "detailed description of the page to design" },
+        prompt: { type: "string", description: "which screen/page you want — describe it (its name/role helps match an existing design)" },
         path: { type: "string", description: "output file path, default index.html" },
         deviceType: { type: "string", description: "DESKTOP (default) or MOBILE" },
+        newScreen: { type: "boolean", description: "force Stitch to GENERATE a brand-new screen instead of reusing an existing one — only for a page that doesn't exist yet (slow)" },
       },
       required: ["prompt"],
     },

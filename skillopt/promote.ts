@@ -11,9 +11,10 @@
 // NOTE: the engine/eval setup intentionally mirrors optimize.ts; a shared runner is
 // a future refactor (kept separate now to avoid disturbing the offline optimizer).
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
 
 import { runAgent, HttpToolExecutor, createProject } from "../agent/index.ts";
 import type { AgentStep } from "../agent/index.ts";
@@ -42,6 +43,21 @@ const SKILL_PATH = path.join(REPO, "skill", "system.md");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (m: string) => console.log(m);
+
+// Heartbeat/timer status the UI reads (the per-task scores + outcome come from the log,
+// which the server parses; this file just preserves startedAt + a liveness heartbeat so the
+// "running" indicator and timer survive a dev-server restart mid-run). Best-effort.
+const STATUS_PATH = path.join(os.homedir(), ".oxy", "auto-promote-status.json");
+let _status: Record<string, unknown> = {};
+function writeStatus(patch: Record<string, unknown>): void {
+  _status = { ..._status, ...patch, heartbeat: Date.now() };
+  try {
+    mkdirSync(path.dirname(STATUS_PATH), { recursive: true });
+    writeFileSync(STATUS_PATH, JSON.stringify(_status), "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
@@ -104,6 +120,7 @@ async function main() {
   log(`target: ${TARGET_ENGINE} (${TARGET_MODEL}) · optimizer: ${OPT_ENGINE} (${OPT_MODEL})`);
   log(`journal: ${fresh} fresh review(s) · val: ${valTasks.length} · repeats: ${VAL_REPEATS} · margin: ${MARGIN}\n${digest}\n`);
 
+  writeStatus({ startedAt: Date.now(), pid: process.pid, finished: false });
   const stop = await ensureBackend();
   const target = await makeEngine(TARGET_ENGINE, TARGET_MODEL);
   const optimizer = MANUAL ? null : await makeEngine(OPT_ENGINE, OPT_MODEL);
@@ -138,6 +155,7 @@ async function main() {
       const med = median(scores);
       perTask.push({ id: task.id, score: med });
       log(`      ${task.id}: ${med.toFixed(2)} (${scores.map((s) => s.toFixed(2)).join("/")})`);
+      writeStatus({}); // heartbeat after each task so "running" + timer stay live
     }
     return { score: perTask.reduce((a, t) => a + t.score, 0) / (perTask.length || 1), perTask };
   };
@@ -192,6 +210,7 @@ async function main() {
   await (target as { dispose?: () => Promise<void> }).dispose?.().catch(() => {});
   if (optimizer) await (optimizer as { dispose?: () => Promise<void> }).dispose?.().catch(() => {});
   stop();
+  writeStatus({ finished: true, deployed });
   log(`\n=== promote done — ${deployed ? "skill improved" : "no change"} ===\n`);
   process.exit(0);
 }

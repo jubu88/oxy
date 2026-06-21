@@ -30,8 +30,45 @@ export type BuildEvent =
   | { type: "project"; project: string }
   | { type: "step"; step: AgentStep }
   | { type: "progress"; iteration: number; tokens: number }
+  | { type: "summary"; iterate: boolean; wrote: string[]; edited: string[]; doneSummary: string; finished: boolean }
   | { type: "done"; project: string }
   | { type: "error"; message: string };
+
+/** Live state of the continuous-improvement (auto-learn / gated promote) background process. */
+export interface AutoLearnStatus {
+  ok: boolean;
+  running: boolean;
+  startedAt: number | null;
+  elapsedMs: number | null;
+  every: number;
+  disabled: boolean;
+  autoLearn: boolean;
+  status: {
+    found: boolean;
+    phase: string;
+    finished: boolean;
+    deployed: boolean | null;
+    outcome: string | null;
+    valTotal: number | null;
+    reviewed: number | null;
+    finishRate: number | null;
+    base: { score: number | null; perTask: Array<{ id: string; score: number }> };
+    candidate: { score: number | null; perTask: Array<{ id: string; score: number }>; proposed: boolean | null };
+  };
+  progress: { done: number; total: number; perPass: number } | null;
+  journal: { total: number; unconsumed: number; finishRate: number | null; topMistakes: Array<{ text: string; count: number }> };
+  logTail: string;
+}
+
+export async function getAutoLearn(): Promise<AutoLearnStatus | null> {
+  try {
+    const r = await fetch("/codelab/api/autolearn");
+    const j = await r.json();
+    return j?.ok ? j : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Events from the one-shot /ask (no build) endpoint. */
 export type AskEvent =

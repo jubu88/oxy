@@ -15,6 +15,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { shouldAutoPromote } from "./auto-promote.mjs";
+import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
@@ -250,11 +251,13 @@ async function designSystemsList() {
 // never silently degrade. Guarded: never while a build is active, never two at once.
 // Off with OXY_AUTO_PROMOTE=0; cadence OXY_PROMOTE_EVERY (default 10).
 let promoteRunning = false;
+let promoteStartedAt = 0; // when the current/last auto-promote spawned (for the UI timer)
 let activeBuilds = 0;
 function maybeAutoPromote(fresh) {
   const every = Number(process.env.OXY_PROMOTE_EVERY) || 10;
   if (!shouldAutoPromote({ fresh, every, promoteRunning, activeBuilds, disabled: process.env.OXY_AUTO_PROMOTE === "0" })) return;
   promoteRunning = true;
+  promoteStartedAt = Date.now();
   let model = "";
   try {
     model = readSettings().llamaModels[0] || "";
@@ -281,6 +284,10 @@ function maybeAutoPromote(fresh) {
         OXY_SO_VAL_REPEATS: process.env.OXY_SO_VAL_REPEATS || "1", // 10 diverse tasks > more repeats for catching regressions on a slow iGPU
         OXY_SUPERVISOR: "0", // the promote spawns its own backend; never let it journal/auto-promote recursively
         OXY_AUTO_PROMOTE: "0",
+        // boot the benchmark's llama-server on a SEPARATE port so it never fights the
+        // main app's model server on :8080 (they were force-restarting each other's model,
+        // wrecking whatever the user was actively building). Override: OXY_PROMOTE_LLAMA_PORT.
+        OXY_LLAMA_PORT: process.env.OXY_PROMOTE_LLAMA_PORT || "8091",
       },
       stdio: ["ignore", out, out],
       windowsHide: true,
@@ -723,18 +730,89 @@ async function stitchMcp(method, params, timeoutMs = STITCH_TIMEOUT_MS) {
 }
 const stitchCall = (name, args, t) => stitchMcp("tools/call", { name, arguments: args }, t);
 
-// generate a screen with Stitch and return its HTML, fetched from the download URL.
-// Flow (verified against the live API): create_project -> generate_screen_from_text
-// -> outputComponents[].design.screens[].htmlCode.downloadUrl -> fetch the HTML.
+// list the existing screens of a Stitch project (each already carries its HTML download
+// URL, so no per-screen get_screen call is needed). Shape verified against the live API:
+// result.structuredContent.screens[] = { title, name:"projects/{p}/screens/{id}", htmlCode:{downloadUrl}, ... }
+async function stitchListScreens(projectId) {
+  const r = await stitchCall("list_screens", { projectId }, 60_000);
+  return (r.structuredContent?.screens ?? [])
+    .map((s) => ({
+      title: String(s.title || "").trim(),
+      name: String(s.name || ""),
+      screenId: String(s.name || "").split("/screens/")[1] || "",
+      htmlUrl: s.htmlCode?.downloadUrl || "",
+      deviceType: String(s.deviceType || ""),
+    }))
+    .filter((s) => s.htmlUrl);
+}
+
+// choose which existing screen to pull in: the one whose title best matches the model's
+// prompt (word overlap), tie-broken toward a primary screen (dashboard/home/main/overview),
+// else the first. Lets the model target a specific screen just by describing it. Exported
+// for unit testing.
+export function pickStitchScreen(screens, prompt) {
+  const p = String(prompt || "").toLowerCase();
+  const scored = screens.map((s) => {
+    const title = s.title.toLowerCase();
+    const score =
+      title
+        .split(/\W+/)
+        .filter((w) => w.length > 2)
+        .reduce((n, w) => n + (p.includes(w) ? 1 : 0), 0) + (/\b(dashboard|home|main|overview)\b/.test(title) ? 0.5 : 0);
+    return { s, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].s;
+}
+
+// download a Stitch-generated HTML page from its (short-lived) download URL.
+async function stitchFetchHtml(url) {
+  const hres = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  let html = await hres.text();
+  if (!/<html|<!doctype/i.test(html)) throw new Error("Stitch download was not HTML");
+  if (Buffer.byteLength(html, "utf8") > MAX_FILE_BYTES) html = html.slice(0, MAX_FILE_BYTES);
+  return html;
+}
+
+// Return a Stitch design's HTML. REUSE-FIRST: when this project already has a Stitch
+// project with screens, FETCH the best-matching existing screen instead of generating a
+// new one — that's instant, uses the exact design as-is, never hits the ~300s generate
+// timeout, and never adds a duplicate screen (the old reuse bug). Only generate when there
+// is no project/screen yet, or the caller explicitly asks for a brand-new screen
+// (opts.forceNew). Flow when generating: create_project -> generate_screen_from_text ->
+// outputComponents[].design.screens[].htmlCode.downloadUrl -> fetch.
 export async function stitchGenerate(prompt, opts = {}) {
   if (typeof prompt !== "string" || !prompt.trim()) throw new Error("prompt required");
   if (stitchBusy) throw new Error("a Stitch generation is already running — try again when it finishes");
   stitchBusy = true;
   const t0 = Date.now();
   try {
-    // reuse a previously-created Stitch project (passed from the project's saved metadata) so
-    // a design UPDATE builds on the same cloud project instead of starting a fresh one each time.
     let projectId = String(opts.projectId || "").trim().replace(/^projects\//, "");
+
+    // reuse-first: pull an existing screen rather than re-prompting Stitch
+    if (projectId && !opts.forceNew) {
+      let screens = [];
+      try {
+        screens = await stitchListScreens(projectId);
+      } catch {
+        screens = []; // bad/inaccessible id — fall through and try to generate instead
+      }
+      if (screens.length) {
+        opts.onProjectId?.(projectId);
+        const pick = pickStitchScreen(screens, prompt);
+        const html = await stitchFetchHtml(pick.htmlUrl);
+        return {
+          html,
+          stitchProjectId: projectId,
+          reused: true,
+          screenTitle: pick.title,
+          screens: screens.map((s) => s.title).filter(Boolean),
+          seconds: Math.round((Date.now() - t0) / 1000),
+        };
+      }
+    }
+
+    // generate path: no project/screens yet, or an explicit new-screen request
     if (!projectId) {
       const cp = await stitchCall("create_project", { title: String(opts.title || "oxy").slice(0, 60) }, 60_000);
       projectId = String(cp.structuredContent?.name || "").replace(/^projects\//, "");
@@ -742,6 +820,7 @@ export async function stitchGenerate(prompt, opts = {}) {
     }
     // persist the id NOW — generate_screen below can take minutes and may hit the timeout;
     // without this an otherwise-created Stitch project would be lost on a slow generate.
+    // (And next time, reuse-first above will find the screen even if this call times out.)
     opts.onProjectId?.(projectId);
     const args = { projectId, prompt: prompt.slice(0, 2000), deviceType: opts.deviceType === "MOBILE" ? "MOBILE" : "DESKTOP" };
     if (opts.designSystem) args.designSystem = opts.designSystem;
@@ -754,11 +833,8 @@ export async function stitchGenerate(prompt, opts = {}) {
           break;
         }
     if (!url) throw new Error("Stitch returned no HTML download URL");
-    const hres = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    let html = await hres.text();
-    if (!/<html|<!doctype/i.test(html)) throw new Error("Stitch download was not HTML");
-    if (Buffer.byteLength(html, "utf8") > MAX_FILE_BYTES) html = html.slice(0, MAX_FILE_BYTES);
-    return { html, stitchProjectId: projectId, seconds: Math.round((Date.now() - t0) / 1000) };
+    const html = await stitchFetchHtml(url);
+    return { html, stitchProjectId: projectId, reused: false, seconds: Math.round((Date.now() - t0) / 1000) };
   } finally {
     stitchBusy = false;
   }
@@ -1052,6 +1128,9 @@ export async function codelabHandler(req, res, next) {
         send({ type: "status", message: imgCount ? `reading your ${imgCount} image${imgCount > 1 ? "s" : ""}…` : "generating…" });
         let lastTok = 0;
         const toolLog = []; // for the continuous-improvement supervisor review
+        const wrote = new Set(); // files created this run (write_file / design_with_stitch)
+        const edited = new Set(); // files changed this run (edit_file)
+        let doneSummary = ""; // the model's own one-line summary from its done call
         let finished = false;
         let loopStopped = false; // the loop already emitted a "stopped: …" reason (e.g. no-tool-calls) — don't also say "step limit"
         await runAgent(
@@ -1080,7 +1159,13 @@ export async function codelabHandler(req, res, next) {
               send({ type: "status", message });
             },
             onStep: (s) => {
-              for (const t of s.toolCalls) toolLog.push(t.name);
+              for (const t of s.toolCalls) {
+                toolLog.push(t.name);
+                const p = t.args?.path;
+                if ((t.name === "write_file" || t.name === "design_with_stitch") && p) wrote.add(String(p));
+                else if (t.name === "edit_file" && p) edited.add(String(p));
+                else if (t.name === "done" && t.args?.summary) doneSummary = String(t.args.summary);
+              }
               if (s.done) finished = true;
               lastTok = 0; // a turn landed — the live counter resets per turn, so reset the throttle too
               send({ type: "step", step: s });
@@ -1106,6 +1191,20 @@ export async function codelabHandler(req, res, next) {
         // (slow models sometimes write style.css/app.js but run out before index.html).
         if (!ac.signal.aborted && !fs.existsSync(path.join(PROJECTS, project, "index.html")))
           send({ type: "status", message: "⚠ no index.html was produced — the app has no entry page and won't render; iterate to have the model create index.html" });
+        // per-run summary of WHAT CHANGED, so the user knows exactly what to test (esp. on
+        // an iterate, where it's otherwise unclear what the model touched this pass).
+        if (!ac.signal.aborted) {
+          const wroteList = [...wrote];
+          const editedList = [...edited].filter((f) => !wrote.has(f)); // a file created this run isn't also "edited"
+          send({
+            type: "summary",
+            iterate,
+            wrote: wroteList,
+            edited: editedList,
+            doneSummary,
+            finished,
+          });
+        }
         send({ type: "done", project });
         // continuous improvement: review THIS build in the background (best-effort,
         // never blocks the response). watch-always; deploy stays gated (promote.ts).
@@ -1325,15 +1424,69 @@ export async function codelabHandler(req, res, next) {
     if (pathPart === "/codelab/api/stitch-status" && req.method === "GET") {
       return sendJson(res, 200, { available: !!stitchApiKey(), busy: stitchBusy });
     }
+    // auto-learn (continuous-improvement) status: is a gated promote running, how far along,
+    // what it scored, and what the journal has learned — so the UI can show a live indicator,
+    // progress + timer, and the pass/fail outcome instead of silent background projects.
+    if (pathPart === "/codelab/api/autolearn" && req.method === "GET") {
+      let logText = "";
+      let logMtime = 0;
+      try {
+        const lp = path.join(OXY_HOME, "auto-promote.log");
+        logText = fs.readFileSync(lp, "utf8");
+        logMtime = fs.statSync(lp).mtimeMs;
+      } catch {}
+      let statusFile = null;
+      try {
+        statusFile = JSON.parse(fs.readFileSync(path.join(OXY_HOME, "auto-promote-status.json"), "utf8"));
+      } catch {}
+      const parsed = parseAutoPromoteLog(logText);
+      const progress = autoLearnProgress(parsed);
+      // "running" survives a server restart: trust the in-memory flag, else a fresh heartbeat
+      // (status file) or a recently-written, not-yet-finished log.
+      const fresh = (t) => t && Date.now() - t < 150_000;
+      const running = promoteRunning || fresh(statusFile?.heartbeat) || (parsed.found && !parsed.finished && fresh(logMtime));
+      const startedAt = (promoteRunning && promoteStartedAt) || statusFile?.startedAt || null;
+      // journal = "what it learned" from real builds
+      let journal = { total: 0, unconsumed: 0, finishRate: null, topMistakes: [] };
+      try {
+        const { readJournal } = await import("../skillopt/supervisor.ts");
+        const all = readJournal();
+        const freshEntries = all.filter((e) => !e.consumed);
+        const tally = new Map();
+        for (const e of freshEntries) for (const mm of e.mistakes || []) tally.set(mm, (tally.get(mm) || 0) + 1);
+        journal = {
+          total: all.length,
+          unconsumed: freshEntries.length,
+          finishRate: freshEntries.length ? Math.round((freshEntries.filter((e) => e.finished).length / freshEntries.length) * 100) : null,
+          topMistakes: [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([text, count]) => ({ text, count })),
+        };
+      } catch {}
+      return sendJson(res, 200, {
+        ok: true,
+        running,
+        startedAt,
+        elapsedMs: running && startedAt ? Date.now() - startedAt : null,
+        every: Number(process.env.OXY_PROMOTE_EVERY) || 10,
+        disabled: process.env.OXY_AUTO_PROMOTE === "0",
+        autoLearn: readSettings().features.autoLearn !== false,
+        status: parsed,
+        progress,
+        journal,
+        logTail: logText.split(/\r?\n/).filter(Boolean).slice(-14).join("\n"),
+      });
+    }
     if (pathPart === "/codelab/api/design-stitch" && req.method === "POST") {
-      const { project, path: rel, prompt, deviceType, designSystem } = await readBody(req);
+      const { project, path: rel, prompt, deviceType, designSystem, newScreen } = await readBody(req);
       // reuse this project's Stitch project across design updates; persist the id the MOMENT
-      // it's created (onProjectId) so a slow/timed-out generate can't lose it.
+      // it's created (onProjectId) so a slow/timed-out generate can't lose it. By default we
+      // REUSE an existing screen (instant, exact design, no duplicate); newScreen forces a
+      // fresh generation for a page that doesn't exist yet.
       let r;
       try {
         r = await stitchGenerate(prompt, {
           deviceType,
           designSystem,
+          forceNew: !!newScreen,
           title: project,
           projectId: readProjectMeta(project).stitchProjectId,
           onProjectId: (id) => {
@@ -1361,6 +1514,9 @@ export async function codelabHandler(req, res, next) {
         path: target,
         bytes: Buffer.byteLength(r.html, "utf8"),
         seconds: r.seconds,
+        reused: !!r.reused,
+        screenTitle: r.screenTitle || "",
+        screens: Array.isArray(r.screens) ? r.screens : [],
         preview: r.html.slice(0, 600),
       });
     }

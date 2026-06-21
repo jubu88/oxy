@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react
 import type { AgentStep } from "../agent/types.ts";
 import { Background } from "./Background.tsx";
 import { Settings } from "./Settings.tsx";
+import { AutoLearn } from "./AutoLearn.tsx";
 import { exportUrl, getProjects, getStatus, previewUrl, runAsk, runBuild, saveStitchProjectId, type AskEvent, type Attachment, type BuildEvent, type OxyStatus, type ProjectInfo } from "./api.ts";
 
 const NUM_CTX = 16384; // matches the loop's context budget
@@ -184,6 +185,7 @@ export function App() {
   const [items, setItems] = useState<TimelineItem[]>([]); // completed phase/step rows, each with its duration
   const [activeLabel, setActiveLabel] = useState(""); // the in-progress row's label (live timer)
   const [lastBuildMs, setLastBuildMs] = useState(0); // total wall-clock of the last finished build
+  const [summary, setSummary] = useState<Extract<BuildEvent, { type: "summary" }> | null>(null); // what changed this run
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const activeLabelRef = useRef(""); // current active label, read inside the streaming callback (avoids stale closure)
@@ -284,6 +286,7 @@ export function App() {
     setError("");
     setSteps([]);
     setItems([]);
+    setSummary(null);
     setLastBuildMs(0);
     activeLabelRef.current = "starting…";
     setActiveLabel("starting…");
@@ -315,6 +318,8 @@ export function App() {
             if (e.step.toolCalls.some((t) => ["write_file", "edit_file", "design_with_stitch"].includes(t.name))) setPreviewKey((k) => k + 1);
           } else if (e.type === "progress") {
             setLiveTokens(e.tokens);
+          } else if (e.type === "summary") {
+            setSummary(e);
           } else if (e.type === "done") {
             if (activeLabelRef.current) closeRow("phase", activeLabelRef.current, { done: true });
             activeLabelRef.current = "";
@@ -530,6 +535,8 @@ export function App() {
 
         {error && <div className="banner error">{error}</div>}
 
+        <AutoLearn />
+
         {mode === "build" && (items.length > 0 || building) && (
           <section>
             <p className="section-title">
@@ -570,6 +577,32 @@ export function App() {
                   </div>
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {mode === "build" && summary && !building && (summary.wrote.length > 0 || summary.edited.length > 0 || summary.doneSummary) && (
+          <section className="changes-card">
+            <p className="section-title">What changed{summary.iterate ? " this update" : ""}</p>
+            <div className="card changes">
+              {summary.doneSummary && <div className="changes-summary">{summary.doneSummary}</div>}
+              {summary.wrote.length > 0 && (
+                <div className="changes-row">
+                  <span className="changes-tag new">created</span>
+                  {summary.wrote.map((f) => (
+                    <code key={f}>{f}</code>
+                  ))}
+                </div>
+              )}
+              {summary.edited.length > 0 && (
+                <div className="changes-row">
+                  <span className="changes-tag edit">edited</span>
+                  {summary.edited.map((f) => (
+                    <code key={f}>{f}</code>
+                  ))}
+                </div>
+              )}
+              {!summary.finished && <div className="changes-note">⚠ the model didn't call done — this run may be incomplete; iterate to continue.</div>}
             </div>
           </section>
         )}
