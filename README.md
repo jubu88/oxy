@@ -7,11 +7,11 @@ writing the files, styling them with a real design system, previewing the result
 and checking its own work. No cloud account, no API key, nothing to configure.
 
 The headline: it works beautifully with **gemma4 E2B**, a *tiny* (~2B-class) model.
-You do **not** need a big GPU, 32 GB of RAM, or a paid API. On a plain laptop with
-**integrated graphics** (an Intel Iris Xe iGPU), Oxy runs the default model in about
-**5 GB of RAM at ~11 tokens/sec** and turns out a clean little web app in **a minute
-or two** — entirely offline, for free. A bigger model makes bigger apps; the point is
-you don't *need* one to get a genuinely nice result.
+You do **not** need a big GPU, 32 GB of RAM, or a paid API. Even on **integrated
+graphics** (for reference, on an Intel Iris Xe iGPU it uses roughly **5 GB of RAM at
+~11 tokens/sec**), it turns out a clean little web app in **a minute or two** — entirely
+offline, for free. More powerful hardware is faster and a bigger model makes bigger apps;
+the point is you don't *need* either to get a genuinely nice result.
 
 > Oxy is the productized descendant of the **Reasoning Lab** research bench, where
 > the orchestration techniques below were discovered and measured. The bench keeps
@@ -19,11 +19,14 @@ you don't *need* one to get a genuinely nice result.
 
 ## The goal
 
-Big models don't fit on a laptop like this — a 7B crawls and a 12B barely runs (see
-[Performance](#performance-verified)). So Oxy's mission is the opposite of "just use a
-bigger model": make the **smallest capable model** — **gemma4 E2B** (or **E4B** for
-harder work) — a genuine **expert at building web apps**, by wrapping it in
-orchestration and a skill that keeps improving from real use.
+Oxy's mission is the opposite of "just use a bigger model": make the **smallest capable
+model** — **gemma4 E2B** (or **E4B** for harder work) — a genuine **expert at building
+web apps**, by wrapping it in orchestration and a skill that keeps improving from real
+use. The payoff is that it runs on modest, everyday hardware (integrated graphics, a few
+GB of RAM) and gets better the more it's used. Bigger models are welcome and make bigger
+apps — Oxy just doesn't *require* one. (On low-end hardware large models are impractical
+anyway — a 7B crawls and a 12B barely runs there; see [Performance](#performance-verified) —
+which is exactly why getting the most out of a small model is the goal.)
 
 **Web is the focus today.** The same machinery is meant to extend later to other
 targets (**Android / iOS**), each with its **own skill file** and a web/android/ios
@@ -34,6 +37,11 @@ promise. See [Roadmap](#roadmap).
 
 - **Build from a prompt.** Type "a tip calculator", "a pomodoro timer", "a tic-tac-toe
   game" → a working, styled, single-page app you can preview and export.
+- **Real libraries, via lightweight RAG.** Ask for a **Supabase**-backed app (auth, a
+  database, edge functions), a **Web Components** widget, or a **React** SPA — Oxy pulls
+  the *correct, current* API patterns into context on demand (the `get_reference` tool over
+  a curated `reference/` corpus), so a tiny model writes working library code instead of
+  hallucinating it. (React runs as a **no-build CDN SPA** — Oxy has no bundler.)
 - **Pick a design — or let the model choose.** A **design picker** offers **12 design
   systems**: *modern-saas, warm-artisan, playful, minimal-mono, dark-dashboard,
   brutalist, glass, editorial, terminal, organic, corporate, vibrant*. Same prompt,
@@ -105,8 +113,9 @@ their weight. All of these are **toggleable in Settings** (flip one off to A/B i
   accumulate, propose a skill edit, **benchmark it against the current skill, and
   deploy only on a strict win** (margin + no per-task regression). Self-improving,
   never degrading.
-- **Use the learned skill** — build with the tuned `skill/system.md`, or flip it off
-  to compare against the built-in baseline prompt.
+- **Use the learned skill** — build with the tuned skill (a per-model `skill/<model>.md`
+  when one exists, else the shared `skill/system.md` baseline), or flip it off to compare
+  against the built-in prompt.
 - **Auto-compact** — when the context fills, Oxy checkpoints the build state to disk
   and continues from a fresh, small context. Lets a small model build things bigger
   than its context window, and makes builds resumable after a crash/sleep.
@@ -126,15 +135,16 @@ and **Google Stitch** design.
 
 ## Performance (verified)
 
-On a 16 GB laptop with an **Intel Iris Xe iGPU** (integrated graphics, Vulkan), no
-discrete GPU:
+Reference numbers, measured on a deliberately modest machine — a 16 GB laptop with an
+**Intel Iris Xe iGPU** (integrated graphics, Vulkan, no discrete GPU). They show the low
+end is enough; faster hardware will do better:
 
 | model            | quant            | RAM     | speed         |
 | ---------------- | ---------------- | ------- | ------------- |
 | **gemma4 E2B**   | Q4_K_M + q8_0 KV | ~4.6 GB | ~11.5 tok/s   |
 | gemma4 E4B       | Q4_K_M           | ~7 GB   | ~6.3 tok/s    |
 
-A "hello world" page builds in ~70 s; small interactive apps in a couple of minutes.
+There, a "hello world" page builds in ~70 s and small interactive apps in a couple of minutes.
 The big wins came from forcing a single full-context slot (`-np 1`), quantizing the
 KV cache (`-ctk/-ctv q8_0`) to stay out of swap, skipping gemma4's default
 thinking, and downscaling vision input — see `skillopt/` and the engine notes.
@@ -174,14 +184,16 @@ server/     jailed backend (file tools, preview, SSRF-guarded web, SD, Stitch,
 driver/     headless build driver (run-build.ts)
 src/        the React UI (main build page + Settings), designed in Stitch
 design/     the Stitch-generated design reference
-skill/      system.md — the agent "skill" (optimizable prompt) builds read
+skill/      per-model skills (skill/<model>.md) + the shared system.md baseline — the optimizable prompt builds read
+reference/  curated library snippets (Supabase / Web Components / React) served by get_reference (RAG)
 skillopt/   self-optimizing-skill loop: supervisor (watch) + promote (gated deploy)
 ```
 
 ## Self-optimizing skill (SkillOpt)
 
-The agent's `SYSTEM` prompt lives in `skill/system.md` — a small, inspectable "skill"
-that every build reads. Oxy improves it two ways, **watch-always, deploy-gated**:
+The agent's `SYSTEM` prompt lives in a small, inspectable "skill" file every build reads
+— a per-model `skill/<model>.md` when one exists, else the shared `skill/system.md`
+baseline. Oxy improves it two ways, **watch-always, deploy-gated**:
 
 - **Watch (always on by default).** A supervisor reviews each finished build in the
   background and journals what went well / wrong to `skillopt/journal.jsonl`. Never
@@ -236,17 +248,17 @@ npm run build    # type-check + production bundle
 Oxy is still early; the throughline is **deepening the small model's web expertise**
 before widening scope.
 
-- **RAG for real backends (next).** Retrieval-augmented generation so the model can
-  write **Supabase** edge functions, SQL schemas, and DB queries correctly — pulling the
-  exact API/usage it needs into context instead of guessing. This fits Oxy's model
-  perfectly: the frontend stays static and calls the cloud backend, so there's still no
-  local build step. Because a ~2B model degrades with a longer prompt, retrieval must be
-  **surgical** — inject only the few snippets that matter, never dump docs.
-- **More frontend libraries — selectively.** **Web Components** are a cheap, native fit
-  (no build step) and a good RAG target. **React / Next are deferred:** they need a
-  bundler/SSR runtime Oxy doesn't have, so there the bottleneck is the *runtime*, not the
-  model's knowledge — RAG alone wouldn't unlock them. (If ever: client-only Vite + React
-  long before Next.)
+- **RAG for real libraries — shipped, expanding.** A curated, surgical reference
+  (`reference/*.md`, served by the `get_reference` tool) lets the model write correct
+  **Supabase** (auth, DB, RLS, SQL, edge functions), **Web Components**, and **React** code
+  instead of guessing. It's hand-curated keyword retrieval, not embeddings — and
+  deliberately surgical (a ~2B degrades with a long prompt, so it returns only the matching
+  snippets). Next: broaden the corpora and add a Supabase project config (URL + anon key)
+  in Settings so generated apps wire to a real backend.
+- **React today is no-build (CDN + Babel); real Vite/Next is deferred.** The component,
+  hook, state and routing patterns run in Oxy's static iframe via a CDN SPA. A true Vite
+  build (or Next's SSR) needs a bundler/server runtime Oxy doesn't have yet — the
+  bottleneck there is the *runtime*, not the model's knowledge.
 - **Other platforms (later, aspirational).** Android (Kotlin Compose) / iOS (Swift)
   would each get their **own skill file** and benchmark, picked via a web/android/ios
   selector in the UI. Native mobile on a tiny local model is an open question — kept in

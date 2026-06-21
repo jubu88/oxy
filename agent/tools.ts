@@ -71,6 +71,19 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "get_reference",
+    description:
+      "Get correct, ready-to-use code patterns for a library/framework BEFORE writing code that uses it — so you use the real, current API instead of guessing. Libraries: 'supabase' (auth, database/select/insert/update/delete, realtime, storage, RLS, SQL schema, edge functions), 'web-components' (native custom elements, shadow DOM, slots), 'react' (a NO-BUILD CDN + in-browser-Babel SPA — Oxy has no bundler, so never use Vite/npm/import-based JSX files). Returns the matching snippet(s); if the topic doesn't match it returns the available topics to retry with.",
+    parameters: {
+      type: "object",
+      properties: {
+        library: { type: "string", description: "one of: supabase, web-components, react" },
+        topic: { type: "string", description: "what you need, e.g. 'auth', 'insert row', 'hooks', 'routing', 'shadow dom'" },
+      },
+      required: ["library", "topic"],
+    },
+  },
+  {
     name: "web_search",
     description: "Search the web for documentation or examples. Returns titles and URLs.",
     parameters: {

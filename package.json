@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test agent/loop.test.ts agent/tools.test.ts engine/tool-parse.test.ts engine/openai-map.test.ts skillopt/score.test.ts skillopt/loop.test.ts skillopt/supervisor.test.ts skillopt/model-config.test.mjs server/sandbox.test.mjs server/auto-promote.test.mjs server/sanitize.test.mjs server/stitch.test.mjs server/autolearn.test.mjs",
+    "test": "node --test agent/loop.test.ts agent/tools.test.ts engine/tool-parse.test.ts engine/openai-map.test.ts skillopt/score.test.ts skillopt/loop.test.ts skillopt/supervisor.test.ts skillopt/model-config.test.mjs server/sandbox.test.mjs server/auto-promote.test.mjs server/sanitize.test.mjs server/stitch.test.mjs server/autolearn.test.mjs server/reference.test.mjs",
     "oxy": "node driver/run-build.ts",
     "serve": "node server/serve.mjs",
     "skillopt": "node skillopt/optimize.ts",

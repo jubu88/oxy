@@ -119,6 +119,10 @@ export class HttpToolExecutor implements ToolExecutor {
         const r = await (await fetch(`${api}/run-command`, post({ project, command: args.command }))).json();
         return r.ok ? r.output : `error: ${r.error || r.output}`;
       }
+      if (name === "get_reference") {
+        const r = await (await fetch(`${api}/reference`, post({ library: args.library, topic: args.topic }))).json();
+        return r.ok ? r.text : `error: ${r.error}`;
+      }
       if (name === "done") return "done";
       return `error: unknown tool ${name}`;
     } catch (e: any) {

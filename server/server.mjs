@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
+import { getReference } from "./reference.mjs";
 import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
@@ -1126,6 +1127,18 @@ export async function codelabHandler(req, res, next) {
         const baselineSkill = path.resolve(ROOT, "skill", "system.md");
         const skillPath = fs.existsSync(perModelSkill) ? perModelSkill : baselineSkill;
         const systemOverride = features.useSkill !== false && fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
+        // surgical RAG nudge: if the app targets a library we have a reference for, point the
+        // model at get_reference — but ONLY when relevant, so plain static builds stay lean
+        // (the ~2B is prompt-length sensitive). Rides on the loaded skill (skipped if skills off).
+        const refText = `${task} ${projectGoal}`.toLowerCase();
+        const refHint = /supabase/.test(refText)
+          ? '\n\nThis app uses Supabase — before writing Supabase code call get_reference({library:"supabase", topic}) (topics: auth, select, insert, update, delete, realtime, storage, rls, schema, edge-function).'
+          : /\breact\b/.test(refText)
+            ? '\n\nThis app uses React — Oxy has NO bundler, so build a no-build CDN+Babel SPA; call get_reference({library:"react", topic}) starting with topic "setup".'
+            : /web[ -]?components?|custom element/.test(refText)
+              ? '\n\nThis app uses Web Components — call get_reference({library:"web-components", topic}) (topics: define, shadow-dom, attributes, lifecycle, events, slots).'
+              : "";
+        const systemForBuild = systemOverride && refHint ? systemOverride + refHint : systemOverride;
         // multimodal attachments (images/audio) from the client — validate the shape
         const attachments = Array.isArray(body.attachments)
           ? body.attachments.filter((a) => a && (a.kind === "image" || a.kind === "audio") && typeof a.mime === "string" && typeof a.data === "string").slice(0, 6)
@@ -1151,7 +1164,7 @@ export async function codelabHandler(req, res, next) {
             designStyle: typeof body.design === "string" ? body.design : "",
             iterate,
             projectGoal, // original prompt (persisted) so updates know what the app is
-            systemOverride,
+            systemOverride: systemForBuild,
             attachments: attachments && attachments.length ? attachments : undefined,
             enabledTools: readSettings().tools,
             thinking: features.thinking, // gemma4 otherwise burns its budget reasoning (default OFF)
@@ -1539,6 +1552,11 @@ export async function codelabHandler(req, res, next) {
       const svg = ic && ic.ok ? await ic.text() : "";
       if (!svg.startsWith("<svg")) return sendJson(res, 200, { ok: false, error: `icon not found: ${set}:${name}` });
       return sendJson(res, 200, { ok: true, svg });
+    }
+    // RAG: return curated, surgical library reference snippets (Supabase / web-components / react)
+    if (pathPart === "/codelab/api/reference" && req.method === "POST") {
+      const { library, topic } = await readBody(req);
+      return sendJson(res, 200, getReference(path.resolve(ROOT, "reference"), library, topic));
     }
 
     res.statusCode = 404;

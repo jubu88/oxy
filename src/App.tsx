@@ -14,6 +14,7 @@ const TOOL_ICON: Record<string, string> = {
   read_file: "description",
   list_files: "folder_open",
   get_icon: "star",
+  get_reference: "menu_book",
   web_search: "search",
   web_fetch: "public",
   generate_image: "image",
