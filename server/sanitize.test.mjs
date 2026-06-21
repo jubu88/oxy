@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts } from "./sanitize.mjs";
 
 // ---- sanitizeFileContent (pure) ----
 
@@ -97,4 +97,54 @@ test("sanitizeProject heals a broken app.js on disk in place", () => {
   assert.equal(fixes.length, 1);
   assert.equal(fs.readFileSync(path.join(dir, "app.js"), "utf8"), `const a = 1;`);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---- repairModuleScripts (filesystem) ----
+
+test("repairModuleScripts: classic <script> + top-level await -> type=module (the live Supabase bug)", () => {
+  const dir = tmpProject({
+    "index.html": `<!DOCTYPE html><body><script src="app.js"></script></body>`,
+    "app.js": `const s = await fetch("/x");\nconsole.log(s);`, // top-level await — dies as a classic script
+  });
+  const fixes = repairModuleScripts(dir);
+  assert.equal(fixes.length, 1);
+  assert.match(fs.readFileSync(path.join(dir, "index.html"), "utf8"), /<script\s+type="module"\s+src="app\.js">/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("repairModuleScripts: classic <script> + static import -> type=module", () => {
+  const dir = tmpProject({
+    "index.html": `<script src="app.js"></script>`,
+    "app.js": `import { createClient } from "https://esm.sh/@supabase/supabase-js@2";\nconst c = createClient("u", "k");`,
+  });
+  repairModuleScripts(dir);
+  assert.match(fs.readFileSync(path.join(dir, "index.html"), "utf8"), /type="module"/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("repairModuleScripts: leaves plain classic / remote / babel / already-module scripts untouched", () => {
+  const dir = tmpProject({
+    "index.html":
+      `<script src="app.js"></script>` +
+      `<script src="https://cdn.example/x.js"></script>` +
+      `<script type="text/babel" src="b.js"></script>` +
+      `<script type="module" src="m.js"></script>`,
+    "app.js": `const x = 1; function go(){ return x; }`, // plain classic JS — valid as-is
+    "b.js": `const j = 1;`,
+    "m.js": `import "./x.js";`,
+  });
+  const fixes = repairModuleScripts(dir);
+  assert.equal(fixes.length, 0, fixes.join(" | "));
+  assert.match(fs.readFileSync(path.join(dir, "index.html"), "utf8"), /<script src="app\.js">/); // unchanged
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyProject: top-level await flagged for a classic script, but NOT once it's a module", () => {
+  const classic = tmpProject({ "index.html": `<script src="app.js"></script>`, "app.js": `const s = await fetch("/x");` });
+  assert.ok(verifyProject(classic).some((i) => /await is only valid/i.test(i)));
+  fs.rmSync(classic, { recursive: true, force: true });
+
+  const moduled = tmpProject({ "index.html": `<script type="module" src="app.js"></script>`, "app.js": `const s = await fetch("/x");` });
+  assert.deepEqual(verifyProject(moduled), []); // module: top-level await is legitimate
+  fs.rmSync(moduled, { recursive: true, force: true });
 });

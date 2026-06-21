@@ -18,7 +18,7 @@ import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
 import { getReference } from "./reference.mjs";
-import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
 // (it hallucinated on test images), so default to a dedicated small VLM. moondream
@@ -1204,6 +1204,13 @@ export async function codelabHandler(req, res, next) {
         // a build that ran out of turns without the model calling done isn't an error, but
         // it shouldn't look like a silent stop either — say so (the files are still saved).
         if (!finished && !loopStopped && !ac.signal.aborted) send({ type: "status", message: "stopped: reached the step limit before finishing — your files are saved; iterate to continue" });
+        // deterministic repair: a linked script that uses import / top-level await MUST be a
+        // module or the whole app's JS dies on load — fix it instead of hoping the model does
+        // (it shipped exactly this with the Supabase ESM client). Runs for fresh + iterate builds.
+        if (!ac.signal.aborted) {
+          const moduleFixes = repairModuleScripts(path.join(PROJECTS, project));
+          if (moduleFixes.length) send({ type: "status", message: `auto-repaired: ${moduleFixes.join(" · ")}` });
+        }
         // post-build static verify: surface what couldn't be auto-fixed (JS syntax errors,
         // links to files that don't exist) so the user knows what one more iterate would fix.
         const verifyIssues = verifyProject(path.join(PROJECTS, project));

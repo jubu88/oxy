@@ -90,6 +90,64 @@ function jsSyntaxError(code) {
   }
 }
 
+/** Does this JS REQUIRE an ES module to run? (static import, top-level export, or top-level
+ *  await — all of which a classic <script> can't execute.) */
+function needsModule(js) {
+  if (/^[ \t]*import\b[^\n]*['"]/m.test(js)) return true; // import … from "…" / import "…"
+  if (/^[ \t]*export\b/m.test(js)) return true; // top-level export
+  const err = jsSyntaxError(js);
+  return !!err && /await is only valid/i.test(err); // top-level await
+}
+
+/**
+ * Deterministic repair: a linked classic `<script src="x.js">` whose x.js uses `import` or a
+ * top-level `await` will THROW on load and kill the whole app's JS (we watched a live build
+ * ship exactly this with the Supabase ESM client). Adding `type="module"` to that script is
+ * always safe — the file was non-functional as a classic script — so fix it instead of hoping
+ * the model gets it right. Mutates *.html in place; returns the fixes applied.
+ */
+export function repairModuleScripts(projectDir) {
+  const fixes = [];
+  let files = [];
+  try {
+    files = fs.readdirSync(projectDir).filter((f) => /\.html?$/i.test(f) && !f.startsWith(".codelab"));
+  } catch {
+    return fixes;
+  }
+  for (const f of files) {
+    const p = path.join(projectDir, f);
+    let html = "";
+    try {
+      html = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    let changed = false;
+    const out = html.replace(/<script\b([^>]*?)\bsrc\s*=\s*("|')([^"']+)\2([^>]*)>/gi, (full, pre, q, src, post) => {
+      if (/\btype\s*=/i.test(pre + " " + post)) return full; // already typed (module/babel/…) — leave it
+      if (/^[a-z]+:\/\//i.test(src) || src.startsWith("//")) return full; // remote — leave it
+      let js = "";
+      try {
+        js = fs.readFileSync(path.join(projectDir, src.split(/[?#]/)[0].replace(/^\.?\//, "")), "utf8");
+      } catch {
+        return full;
+      }
+      if (!needsModule(js)) return full;
+      changed = true;
+      return `<script${pre} type="module" src=${q}${src}${q}${post}>`;
+    });
+    if (changed) {
+      try {
+        fs.writeFileSync(p, out, "utf8");
+        fixes.push(`${f}: loaded a script as type="module" (it uses import / top-level await, which a classic <script> can't run)`);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return fixes;
+}
+
 /**
  * Static checks that CAN'T be auto-fixed safely — surfaced so the next turn can act:
  *  - JavaScript files that don't parse (e.g. a stray brace),
@@ -106,8 +164,26 @@ export function verifyProject(projectDir) {
   }
   const present = new Set(files.map((f) => f.toLowerCase()));
 
+  // read index.html once — for module-script detection AND the link-existence check below
+  const idx = files.find((f) => f.toLowerCase() === "index.html");
+  let html = "";
+  if (idx) {
+    try {
+      html = fs.readFileSync(path.join(projectDir, idx), "utf8");
+    } catch {}
+  }
+  // scripts loaded as type="module" legitimately use top-level await/import — don't flag those
+  const moduleScripts = new Set();
+  for (const re of [
+    /<script\b[^>]*\btype\s*=\s*["']module["'][^>]*\bsrc\s*=\s*["']([^"']+)["']/gi,
+    /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*\btype\s*=\s*["']module["']/gi,
+  ]) {
+    for (const m of html.matchAll(re)) moduleScripts.add(m[1].split(/[?#]/)[0].replace(/^\.?\//, "").toLowerCase());
+  }
+
   for (const f of files) {
     if (!/\.(js|mjs|cjs)$/i.test(f)) continue;
+    if (moduleScripts.has(f.toLowerCase())) continue; // loaded as a module — top-level await/import is valid
     let code = "";
     try {
       code = fs.readFileSync(path.join(projectDir, f), "utf8");
@@ -120,12 +196,7 @@ export function verifyProject(projectDir) {
     if (err) issues.push(`${f} has a JavaScript syntax error: ${err}`);
   }
 
-  const idx = files.find((f) => f.toLowerCase() === "index.html");
   if (idx) {
-    let html = "";
-    try {
-      html = fs.readFileSync(path.join(projectDir, idx), "utf8");
-    } catch {}
     const refs = [...html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]);
     for (const ref of refs) {
       if (/^(https?:|data:|blob:|#|mailto:|tel:|\/\/)/i.test(ref)) continue; // external/anchor
