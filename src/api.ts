@@ -23,6 +23,8 @@ export interface OxyStatus {
   llamaModels?: string[];
   /** design systems offered in the picker (key + friendly label) */
   designSystems?: Array<{ key: string; label: string }>;
+  /** configured Supabase project (URL + public anon key) that generated apps wire to */
+  supabase?: { url: string; anonKey: string };
 }
 
 export type BuildEvent =
@@ -83,7 +85,18 @@ export type AskEvent =
 export async function getStatus(): Promise<OxyStatus> {
   const r = await fetch("/oxy/api/status");
   const j = await r.json();
-  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode, features: j.features, llamaModels: j.llamaModels, designSystems: j.designSystems };
+  return { engines: j.engines ?? {}, stitch: !!j.stitch, sd: !!j.sd, models: j.models ?? [], gpu: j.gpu, ollamaUsesGpu: j.ollamaUsesGpu, recommended: j.recommended, recommendReason: j.recommendReason, tools: j.tools, terminalMode: j.terminalMode, features: j.features, llamaModels: j.llamaModels, designSystems: j.designSystems, supabase: j.supabase };
+}
+
+/** Save the Supabase project config (URL + public anon key). Server persists it (gitignored). */
+export async function saveSupabase(url: string, anonKey: string): Promise<{ url: string; anonKey: string } | null> {
+  try {
+    const r = await fetch("/oxy/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ supabase: { url, anonKey } }) });
+    const j = await r.json();
+    return j.ok ? (j.supabase ?? null) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Toggle the "improvement" feature flags (server persists them; A/B testing). */

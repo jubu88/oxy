@@ -18,7 +18,7 @@ import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
 import { getReference } from "./reference.mjs";
-import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
 // (it hallucinated on test images), so default to a dedicated small VLM. moondream
@@ -111,6 +111,12 @@ const DEFAULT_MODELS = [
 ];
 const sanitizeModels = (arr) =>
   Array.isArray(arr) ? [...new Set(arr.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim()))].slice(0, 40) : null;
+// Supabase project config (URL + anon key). The anon key is PUBLIC (shipped to every browser,
+// gated by RLS) so it's not a secret — but it still lives only in the gitignored oxy.settings.json.
+const sanitizeSupabase = (s) => ({
+  url: typeof s?.url === "string" ? s.url.trim().slice(0, 300) : "",
+  anonKey: typeof s?.anonKey === "string" ? s.anonKey.trim().slice(0, 4000) : "",
+});
 function readSettings() {
   try {
     const s = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
@@ -120,9 +126,10 @@ function readSettings() {
       terminalMode: ["container", "host", "disabled"].includes(s.terminalMode) ? s.terminalMode : "container",
       features: { ...DEFAULT_FEATURES, ...(s.features || {}) },
       llamaModels: [...new Set([...DEFAULT_MODELS, ...(saved || [])])],
+      supabase: sanitizeSupabase(s.supabase),
     };
   } catch {
-    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container", features: { ...DEFAULT_FEATURES }, llamaModels: [...DEFAULT_MODELS] };
+    return { tools: { ...DEFAULT_TOOLS }, terminalMode: "container", features: { ...DEFAULT_FEATURES }, llamaModels: [...DEFAULT_MODELS], supabase: { url: "", anonKey: "" } };
   }
 }
 function writeSettings(next) {
@@ -134,7 +141,8 @@ function writeSettings(next) {
   if (next.features && typeof next.features === "object") for (const k of FEATURE_KEYS) if (typeof next.features[k] === "boolean") features[k] = next.features[k];
   const incoming = sanitizeModels(next.llamaModels);
   const llamaModels = [...new Set([...DEFAULT_MODELS, ...(incoming || cur.llamaModels)])];
-  const merged = { tools, terminalMode, features, llamaModels };
+  const supabase = next.supabase && typeof next.supabase === "object" ? sanitizeSupabase(next.supabase) : cur.supabase;
+  const merged = { tools, terminalMode, features, llamaModels, supabase };
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2), "utf8");
   return merged;
 }
@@ -312,12 +320,15 @@ const MAX_FILES = 80;
 const MAX_FETCH_BYTES = 200 * 1024;
 const FETCH_TIMEOUT_MS = 12_000;
 // the model may only WRITE these text source types (never arbitrary binaries)
-const ALLOWED_EXT = new Set([".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md", ".csv"]);
+// .sql (DB schema/RLS) and .ts (Supabase Deno edge functions) are deploy artifacts the
+// model generates for the user — not served to the preview, but written + zipped.
+const ALLOWED_EXT = new Set([".html", ".htm", ".css", ".js", ".mjs", ".json", ".svg", ".txt", ".md", ".csv", ".sql", ".ts"]);
 // these may be SERVED for preview / included in zips (e.g. SD-generated images)
 const MIME = {
   ".html": "text/html", ".htm": "text/html", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json",
   ".svg": "image/svg+xml", ".txt": "text/plain", ".md": "text/plain", ".csv": "text/csv",
+  ".sql": "text/plain", ".ts": "text/plain",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
 };
 
@@ -923,6 +934,7 @@ export async function codelabHandler(req, res, next) {
         terminalMode: settings.terminalMode,
         features: settings.features,
         llamaModels: settings.llamaModels,
+        supabase: settings.supabase, // url + anon key (public-safe) for the Settings UI
         designSystems: await designSystemsList(),
       });
     }
@@ -938,8 +950,8 @@ export async function codelabHandler(req, res, next) {
           else if (fs.existsSync(keyPath)) fs.unlinkSync(keyPath);
         }
         let settings = readSettings();
-        if (body.tools || body.terminalMode || body.features || body.llamaModels) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode, features: body.features, llamaModels: body.llamaModels });
-        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode, features: settings.features, llamaModels: settings.llamaModels });
+        if (body.tools || body.terminalMode || body.features || body.llamaModels || body.supabase) settings = writeSettings({ tools: body.tools, terminalMode: body.terminalMode, features: body.features, llamaModels: body.llamaModels, supabase: body.supabase });
+        return sendJson(res, 200, { ok: true, stitch: !!stitchApiKey(), tools: settings.tools, terminalMode: settings.terminalMode, features: settings.features, llamaModels: settings.llamaModels, supabase: settings.supabase });
       } catch (e) {
         return sendJson(res, 200, { ok: false, error: String(e?.message ?? e) });
       }
@@ -1132,7 +1144,7 @@ export async function codelabHandler(req, res, next) {
         // (the ~2B is prompt-length sensitive). Rides on the loaded skill (skipped if skills off).
         const refText = `${task} ${projectGoal}`.toLowerCase();
         const refHint = /supabase/.test(refText)
-          ? '\n\nThis app uses Supabase — before writing Supabase code call get_reference({library:"supabase", topic}) (topics: auth, select, insert, update, delete, realtime, storage, rls, schema, edge-function).'
+          ? '\n\nThis app uses Supabase. Call get_reference({library:"supabase", topic}) for patterns (topics: auth, select, insert, update, delete, realtime, storage, rls, schema, edge-function). Use the consts SUPABASE_URL and SUPABASE_ANON_KEY for the client — Oxy fills in the real project values, so just leave them as placeholders. ALSO write the database setup as schema.sql (CREATE TABLE + enable RLS + policies) so the user can run it; if the app needs server-side logic, write the edge function to supabase/functions/<name>/index.ts.'
           : /\breact\b/.test(refText)
             ? '\n\nThis app uses React — Oxy has NO bundler, so build a no-build CDN+Babel SPA; call get_reference({library:"react", topic}) starting with topic "setup".'
             : /web[ -]?components?|custom element/.test(refText)
@@ -1210,6 +1222,13 @@ export async function codelabHandler(req, res, next) {
         if (!ac.signal.aborted) {
           const moduleFixes = repairModuleScripts(path.join(PROJECTS, project));
           if (moduleFixes.length) send({ type: "status", message: `auto-repaired: ${moduleFixes.join(" · ")}` });
+          // wire the user's real Supabase project (URL + anon key) into the generated frontend,
+          // so the model writes placeholder consts and Oxy fills the actual values deterministically.
+          const sb = readSettings().supabase;
+          if (sb.url && sb.anonKey) {
+            const sbFixes = injectSupabaseConfig(path.join(PROJECTS, project), sb.url, sb.anonKey);
+            if (sbFixes.length) send({ type: "status", message: `wired your Supabase project into ${sbFixes.join(", ")}` });
+          }
         }
         // post-build static verify: surface what couldn't be auto-fixed (JS syntax errors,
         // links to files that don't exist) so the user knows what one more iterate would fix.

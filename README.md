@@ -42,6 +42,10 @@ promise. See [Roadmap](#roadmap).
   the *correct, current* API patterns into context on demand (the `get_reference` tool over
   a curated `reference/` corpus), so a tiny model writes working library code instead of
   hallucinating it. (React runs as a **no-build CDN SPA** — Oxy has no bundler.)
+- **Wire to a real backend.** Set a **Supabase project (URL + anon key) in Settings** and
+  Oxy injects the real credentials into generated apps automatically (the model only writes
+  placeholders — no copying a 300-char key). It also generates the **`schema.sql`** (tables +
+  RLS) and **edge functions** (`supabase/functions/<name>/index.ts`) for you to deploy.
 - **Pick a design — or let the model choose.** A **design picker** offers **12 design
   systems**: *modern-saas, warm-artisan, playful, minimal-mono, dark-dashboard,
   brutalist, glass, editorial, terminal, organic, corporate, vibrant*. Same prompt,
@@ -100,7 +104,7 @@ the design picker, a live build timeline that surfaces the orchestration
 
 A dedicated **Settings** page holds everything else: engine + model picker, the
 Hugging Face download browser, the improvement-feature toggles (below), per-tool
-switches, and your Stitch key. **Bring your own keys** — the Stitch key is saved to a
+switches, your Stitch key, and your Supabase project (URL + anon key). **Bring your own keys** — the Stitch key is saved to a
 git-ignored file, never committed and never sent back to the browser.
 
 ## Why a tiny model works here
@@ -253,8 +257,9 @@ before widening scope.
   **Supabase** (auth, DB, RLS, SQL, edge functions), **Web Components**, and **React** code
   instead of guessing. It's hand-curated keyword retrieval, not embeddings — and
   deliberately surgical (a ~2B degrades with a long prompt, so it returns only the matching
-  snippets). Next: broaden the corpora and add a Supabase project config (URL + anon key)
-  in Settings so generated apps wire to a real backend.
+  snippets). A **Supabase project config (URL + anon key) in Settings** wires generated apps
+  to a real backend — Oxy injects the credentials deterministically and the model also emits
+  `schema.sql` + edge functions to deploy. Next: broaden the corpora.
 - **React today is no-build (CDN + Babel); real Vite/Next is deferred.** The component,
   hook, state and routing patterns run in Oxy's static iframe via a CDN SPA. A true Vite
   build (or Next's SSR) needs a bundler/server runtime Oxy doesn't have yet — the

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { checkModel, downloadModel, listDownloadableModels, saveFeatures, saveModels, saveStitchKey, saveToolSettings, type DownloadableModel, type OxyStatus } from "./api.ts";
+import { checkModel, downloadModel, listDownloadableModels, saveFeatures, saveModels, saveStitchKey, saveSupabase, saveToolSettings, type DownloadableModel, type OxyStatus } from "./api.ts";
 
 const modelLabel = (ref: string) => ref.replace(/^hf:/, "");
 
@@ -78,6 +78,9 @@ export function Settings({
   const [dl, setDl] = useState<{ active: boolean; pct: number | null; msg: string }>({ active: false, pct: null, msg: "" });
   const [stitchId, setStitchId] = useState(stitchProjectId || "");
   const [stitchIdMsg, setStitchIdMsg] = useState("");
+  const [supaUrl, setSupaUrl] = useState(status?.supabase?.url ?? "");
+  const [supaKey, setSupaKey] = useState(status?.supabase?.anonKey ?? "");
+  const [supaMsg, setSupaMsg] = useState("");
 
   // keep the field in sync when the selected project (and thus its Stitch id) changes
   useEffect(() => {
@@ -85,10 +88,23 @@ export function Settings({
     setStitchIdMsg("");
   }, [stitchProjectId, selProject]);
 
+  // seed the Supabase fields once the status (with the saved config) arrives
+  useEffect(() => {
+    setSupaUrl(status?.supabase?.url ?? "");
+    setSupaKey(status?.supabase?.anonKey ?? "");
+  }, [status?.supabase?.url, status?.supabase?.anonKey]);
+
   async function commitStitchId() {
     setStitchIdMsg("saving…");
     await onSaveStitchProjectId(stitchId.trim());
     setStitchIdMsg("saved ✓");
+  }
+
+  async function commitSupabase() {
+    setSupaMsg("saving…");
+    const r = await saveSupabase(supaUrl.trim(), supaKey.trim());
+    setSupaMsg(r ? "saved ✓" : "save failed");
+    onSaved();
   }
 
   const ollamaModels = engine === "ollama" ? status?.models ?? [] : [];
@@ -370,6 +386,29 @@ export function Settings({
             </div>
           )}
           {stitchAvailable && !selProject && <span className="tool-hint">Pick a project in the top dropdown to view or set its linked Stitch design.</span>}
+        </div>
+
+        {/* ---- Backend (Supabase) ---- */}
+        <div className="settings-section">
+          <h3>Backend (Supabase)</h3>
+          <div className="field">
+            <label>Project URL</label>
+            <div className="field-row">
+              <input value={supaUrl} onChange={(e) => setSupaUrl(e.target.value)} placeholder="https://YOUR-PROJECT.supabase.co" spellCheck={false} />
+            </div>
+          </div>
+          <div className="field">
+            <label>Anon (public) key</label>
+            <div className="field-row">
+              <input value={supaKey} onChange={(e) => setSupaKey(e.target.value)} placeholder="eyJ…  (the public anon key — safe to ship, gated by RLS)" spellCheck={false} />
+              <button className="build-btn" onClick={commitSupabase}>
+                Save
+              </button>
+            </div>
+            <span className={`field-status ${supaUrl && supaKey ? "ok" : ""}`}>
+              {supaMsg || (supaUrl && supaKey ? "✓ Supabase apps get wired to this project automatically" : "optional — set it and Oxy injects these into generated Supabase apps (the model just writes placeholders). Stored in the git-ignored settings file.")}
+            </span>
+          </div>
         </div>
 
         <div className="modal-actions">

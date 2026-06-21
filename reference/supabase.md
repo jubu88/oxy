@@ -5,6 +5,8 @@ project URL + anon (public) key. Row Level Security protects the data, so the an
 safe to ship. Edge functions / SQL are files you generate for the user to deploy.
 
 ## setup
+Leave `SUPABASE_URL` / `SUPABASE_ANON_KEY` as the placeholder strings below — if the user
+configured a Supabase project in Settings, Oxy fills in the real values automatically.
 CRITICAL: your app JS must be a **module** — `import` and top-level `await` only work in
 modules. In index.html, load app.js with `type="module"` (NOT a classic `<script>`, which
 throws "await is only valid in async functions and the top level bodies of modules").

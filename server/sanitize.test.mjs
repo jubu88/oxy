@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig } from "./sanitize.mjs";
 
 // ---- sanitizeFileContent (pure) ----
 
@@ -147,4 +147,29 @@ test("verifyProject: top-level await flagged for a classic script, but NOT once 
   const moduled = tmpProject({ "index.html": `<script type="module" src="app.js"></script>`, "app.js": `const s = await fetch("/x");` });
   assert.deepEqual(verifyProject(moduled), []); // module: top-level await is legitimate
   fs.rmSync(moduled, { recursive: true, force: true });
+});
+
+// ---- injectSupabaseConfig (filesystem) ----
+
+test("injectSupabaseConfig fills the URL/anon-key consts + createClient literals", () => {
+  const dir = tmpProject({
+    "app.js":
+      `const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";\n` +
+      `const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";\n` +
+      `const c = createClient("https://x.supabase.co", "old-key");`,
+  });
+  const fixed = injectSupabaseConfig(dir, "https://real.supabase.co", "eyJreal.JWT");
+  assert.deepEqual(fixed, ["app.js"]);
+  const out = fs.readFileSync(path.join(dir, "app.js"), "utf8");
+  assert.match(out, /SUPABASE_URL = "https:\/\/real\.supabase\.co"/);
+  assert.match(out, /SUPABASE_ANON_KEY = "eyJreal\.JWT"/);
+  assert.match(out, /createClient\("https:\/\/real\.supabase\.co", "eyJreal\.JWT"\)/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("injectSupabaseConfig is a no-op when the project isn't configured", () => {
+  const dir = tmpProject({ "app.js": `const SUPABASE_URL = "x";` });
+  assert.deepEqual(injectSupabaseConfig(dir, "", ""), []);
+  assert.equal(fs.readFileSync(path.join(dir, "app.js"), "utf8"), `const SUPABASE_URL = "x";`);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

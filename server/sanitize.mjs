@@ -149,6 +149,50 @@ export function repairModuleScripts(projectDir) {
 }
 
 /**
+ * Wire a real Supabase project into generated FRONTEND code: replace whatever value is assigned
+ * to SUPABASE_URL / SUPABASE_ANON_KEY (and a direct createClient("url","key") call) with the
+ * configured project URL + anon key. Deterministic so a tiny model never has to reproduce a
+ * ~300-char JWT — it writes the const names (the reference teaches them) and Oxy fills the values.
+ * Only runs when both are configured. Edge functions are NOT touched (they read Deno.env on the
+ * server). Mutates top-level .js/.mjs/.html in place; returns the files changed.
+ */
+export function injectSupabaseConfig(projectDir, url, anonKey) {
+  const fixes = [];
+  if (!url || !anonKey) return fixes;
+  const U = JSON.stringify(String(url));
+  const K = JSON.stringify(String(anonKey));
+  let files = [];
+  try {
+    files = fs.readdirSync(projectDir).filter((f) => /\.(js|mjs|html?)$/i.test(f) && !f.startsWith(".codelab"));
+  } catch {
+    return fixes;
+  }
+  for (const f of files) {
+    const p = path.join(projectDir, f);
+    let src;
+    try {
+      src = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    let out = src
+      .replace(/(\bSUPABASE_URL\b\s*[:=]\s*)(['"])[^'"]*\2/g, (_m, pre) => pre + U)
+      .replace(/(\bSUPABASE_ANON_KEY\b\s*[:=]\s*)(['"])[^'"]*\2/g, (_m, pre) => pre + K)
+      // direct createClient("url", "key") with string literals (no consts)
+      .replace(/(createClient\(\s*)(['"])[^'"]*\2(\s*,\s*)(['"])[^'"]*\4/g, (_m, g1, _q, sep) => g1 + U + sep + K);
+    if (out !== src) {
+      try {
+        fs.writeFileSync(p, out, "utf8");
+        fixes.push(f);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return fixes;
+}
+
+/**
  * Static checks that CAN'T be auto-fixed safely — surfaced so the next turn can act:
  *  - JavaScript files that don't parse (e.g. a stray brace),
  *  - assets index.html links (<link href>, <script src>) that were never created.
