@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { parseSections, pickReference, getReference, REFERENCE_LIBRARIES } from "./reference.mjs";
+import { parseSections, pickReference, getReference, REFERENCE_LIBRARIES, libraryHint } from "./reference.mjs";
 
 const REF_DIR = path.resolve(import.meta.dirname, "..", "reference");
 
@@ -53,4 +53,15 @@ test("getReference: an unmatched topic lists the available topics to retry", () 
   const r = getReference(REF_DIR, "supabase", "zzz-nonexistent-topic");
   assert.equal(r.ok, true);
   assert.match(r.text, /Available topics:/);
+});
+
+test("libraryHint nudges only for known libraries (used by the build endpoint AND the benchmark)", () => {
+  const sb = libraryHint("a notes app with Supabase auth and a database");
+  assert.match(sb, /get_reference/);
+  assert.match(sb, /schema\.sql/); // tells it to emit the SQL
+  assert.match(libraryHint("a React todo SPA"), /react/i);
+  assert.match(libraryHint("a React todo SPA"), /no.?build|bundler|cdn/i); // steers away from a build toolchain
+  assert.match(libraryHint("a star rating web component"), /web-components/);
+  assert.equal(libraryHint("a tip calculator"), ""); // plain app — stays lean
+  assert.equal(libraryHint(""), "");
 });

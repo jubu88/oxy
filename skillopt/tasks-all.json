@@ -299,6 +299,74 @@
           }
         ]
       }
+    },
+    {
+      "id": "react-todo",
+      "prompt": "Build a to-do app in React as a NO-BUILD single-page app: load React, ReactDOM, and Babel from a CDN and put JSX in a <script type=\"text/babel\"> (Oxy has no bundler). An input plus an \"Add\" button adds a task to a visible list; clicking a task toggles it done. Mount into <div id=\"root\">. Then call done.",
+      "checks": {
+        "selectors": [
+          "#root"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "fill": {
+                  "selector": "input",
+                  "value": "Buy milk"
+                }
+              },
+              {
+                "clickText": "Add"
+              }
+            ],
+            "expect": [
+              {
+                "contains": "Buy milk",
+                "label": "adding a task renders it in the list (React-via-CDN actually runs)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "web-component-counter",
+      "prompt": "Build a reusable Web Component <click-counter>: a custom element that uses shadow DOM and shows a button labeled \"Count: 0\" which increments the number on each click. Use <click-counter> in index.html. Then call done.",
+      "checks": {
+        "selectors": [
+          "click-counter"
+        ],
+        "interactions": [
+          {
+            "steps": [
+              {
+                "clickText": "Count"
+              }
+            ],
+            "expect": [
+              {
+                "selector": "button",
+                "changed": true,
+                "label": "clicking increments the counter (custom element + shadow DOM works)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "supabase-auth",
+      "prompt": "Build a notes app with Supabase auth: an email/password form with Email and Password fields and \"Sign In\" and \"Sign Up\" buttons, and (after sign-in) a list of notes with an input to add one. Use the Supabase JS client with the SUPABASE_URL and SUPABASE_ANON_KEY consts left as placeholders. Then call done.",
+      "checks": {
+        "selectors": [
+          "input"
+        ],
+        "textIncludes": [
+          "email",
+          "password"
+        ]
+      }
     }
   ]
 }

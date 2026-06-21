@@ -53,6 +53,19 @@ export function pickReference(md, topic) {
   return { match, topics };
 }
 
+// The library-aware build nudge: when a task targets a library we have a reference for, tell
+// the model to use get_reference (+ the library specifics). Applied to the skill ONLY for such
+// tasks (plain static builds stay lean). Shared by the build endpoint AND the benchmark promote
+// so a gated library build behaves like a real one. Returns "" when no library is detected.
+export function libraryHint(text) {
+  const t = String(text || "").toLowerCase();
+  if (/supabase/.test(t))
+    return '\n\nThis app uses Supabase. Call get_reference({library:"supabase", topic}) for patterns (topics: auth, select, insert, update, delete, realtime, storage, rls, schema, edge-function). Use the consts SUPABASE_URL and SUPABASE_ANON_KEY for the client — Oxy fills in the real project values, so just leave them as placeholders. ALSO write the database setup as schema.sql (CREATE TABLE + enable RLS + policies) so the user can run it; if the app needs server-side logic, write the edge function to supabase/functions/<name>/index.ts.';
+  if (/\breact\b/.test(t)) return '\n\nThis app uses React — Oxy has NO bundler, so build a no-build CDN+Babel SPA; call get_reference({library:"react", topic}) starting with topic "setup".';
+  if (/web[ -]?components?|custom element/.test(t)) return '\n\nThis app uses Web Components — call get_reference({library:"web-components", topic}) (topics: define, shadow-dom, attributes, lifecycle, events, slots).';
+  return "";
+}
+
 const MAX_REF_BYTES = 6000; // cap what we feed back (brevity matters for a small model)
 
 /** Read reference/<library>.md and return the snippet(s) matching topic (+ available topics). */

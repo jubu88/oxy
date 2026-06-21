@@ -17,7 +17,7 @@ import { spawn } from "node:child_process";
 import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
-import { getReference } from "./reference.mjs";
+import { getReference, libraryHint } from "./reference.mjs";
 import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
@@ -1142,14 +1142,8 @@ export async function codelabHandler(req, res, next) {
         // surgical RAG nudge: if the app targets a library we have a reference for, point the
         // model at get_reference — but ONLY when relevant, so plain static builds stay lean
         // (the ~2B is prompt-length sensitive). Rides on the loaded skill (skipped if skills off).
-        const refText = `${task} ${projectGoal}`.toLowerCase();
-        const refHint = /supabase/.test(refText)
-          ? '\n\nThis app uses Supabase. Call get_reference({library:"supabase", topic}) for patterns (topics: auth, select, insert, update, delete, realtime, storage, rls, schema, edge-function). Use the consts SUPABASE_URL and SUPABASE_ANON_KEY for the client — Oxy fills in the real project values, so just leave them as placeholders. ALSO write the database setup as schema.sql (CREATE TABLE + enable RLS + policies) so the user can run it; if the app needs server-side logic, write the edge function to supabase/functions/<name>/index.ts.'
-          : /\breact\b/.test(refText)
-            ? '\n\nThis app uses React — Oxy has NO bundler, so build a no-build CDN+Babel SPA; call get_reference({library:"react", topic}) starting with topic "setup".'
-            : /web[ -]?components?|custom element/.test(refText)
-              ? '\n\nThis app uses Web Components — call get_reference({library:"web-components", topic}) (topics: define, shadow-dom, attributes, lifecycle, events, slots).'
-              : "";
+        // Shared with the benchmark promote so a gated library build behaves like a real one.
+        const refHint = libraryHint(`${task} ${projectGoal}`);
         const systemForBuild = systemOverride && refHint ? systemOverride + refHint : systemOverride;
         // multimodal attachments (images/audio) from the client — validate the shape
         const attachments = Array.isArray(body.attachments)

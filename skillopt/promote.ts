@@ -22,6 +22,8 @@ import type { Engine } from "../engine/engine.ts";
 import { scoreProject, type Task } from "./score.ts";
 import { journalDigest, markAllConsumed, unconsumedCount } from "./supervisor.ts";
 import { modelKey } from "./model-config.mjs";
+import { libraryHint } from "../server/reference.mjs";
+import { repairModuleScripts } from "../server/sanitize.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -136,13 +138,15 @@ async function main() {
   if (optimizer) await optimizer.ensureReady();
 
   const buildOnce = async (skill: string, task: Task) => {
+    // mirror a real build: library tasks get the same get_reference nudge + extra step budget
+    const hint = libraryHint(task.prompt);
     let project = "";
     let steps: AgentStep[] = [];
     for (let attempt = 1; attempt <= 2; attempt++) {
       project = await createProject(`pr-${task.id}`, BASE);
       steps = [];
       try {
-        await runAgent({ task: task.prompt, project, maxIterations: MAXITER, temperature: 0.6, systemOverride: skill }, { engine: target, executor, onStep: (s) => steps.push(s) });
+        await runAgent({ task: task.prompt, project, maxIterations: MAXITER + (hint ? 8 : 0), temperature: 0.6, systemOverride: skill + hint }, { engine: target, executor, onStep: (s) => steps.push(s) });
         break;
       } catch (e: any) {
         log(`      ${task.id}: build error (${attempt}/2) — ${String(e?.message ?? e).slice(0, 70)}`);
@@ -150,7 +154,9 @@ async function main() {
       }
     }
     const finished = steps.at(-1)?.done ?? false;
-    const { score, breakdown } = await scoreProject(path.join(REPO, "workspace", "projects", project), task, { finished });
+    const projectDir = path.join(REPO, "workspace", "projects", project);
+    repairModuleScripts(projectDir); // same deterministic repair the build endpoint runs, before scoring
+    const { score, breakdown } = await scoreProject(projectDir, task, { finished });
     return { score, breakdown };
   };
 
