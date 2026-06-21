@@ -23,6 +23,9 @@ export interface BuildSummary {
   errors: string[]; // runtime errors if known
   fileCount: number;
   iterate: boolean;
+  /** the model that ran this build (modelKey form). Lessons are PER-MODEL: a 12B/Qwen
+   *  mistake must not be folded into the E2B skill — see model-config.mjs / promote.ts. */
+  model?: string;
 }
 
 export interface ReviewEntry {
@@ -34,6 +37,8 @@ export interface ReviewEntry {
   mistakes: string[];
   /** ONE general, procedural lesson for the skill (not task-specific); "" if none */
   lesson: string;
+  /** which model produced this build (modelKey); "" for legacy/untagged entries */
+  model: string;
   /** already folded into a skill-edit proposal by promote.ts */
   consumed?: boolean;
 }
@@ -70,6 +75,7 @@ export function toReviewEntry(b: BuildSummary, raw: string, now: number): Review
     wins: asStrings(j.wins),
     mistakes: asStrings(j.mistakes),
     lesson: typeof j.lesson === "string" ? j.lesson.trim() : "",
+    model: b.model || "",
   };
 }
 
@@ -128,13 +134,16 @@ export function readJournal(): ReviewEntry[] {
   }
 }
 
-export function unconsumedCount(): number {
-  return readJournal().filter((e) => !e.consumed).length;
+/** Count fresh (unconsumed) lessons. Pass a model key to count only THAT model's lessons
+ *  (per-model learning — the promote for a model must not be triggered by another's builds). */
+export function unconsumedCount(model?: string): number {
+  return readJournal().filter((e) => !e.consumed && (!model || e.model === model)).length;
 }
 
-/** Mark all current entries consumed (after a promote folds their lessons into an edit). */
-export function markAllConsumed(): void {
-  const all = readJournal().map((e) => ({ ...e, consumed: true }));
+/** Mark entries consumed after a promote folds their lessons in. Scoped to a model when given
+ *  (so promoting the E2B skill doesn't discard the unconsumed lessons of other models). */
+export function markAllConsumed(model?: string): void {
+  const all = readJournal().map((e) => (!model || e.model === model ? { ...e, consumed: true } : e));
   try {
     fs.writeFileSync(JOURNAL_PATH, all.map((e) => JSON.stringify(e)).join("\n") + (all.length ? "\n" : ""), "utf8");
   } catch {
@@ -142,9 +151,10 @@ export function markAllConsumed(): void {
   }
 }
 
-/** Digest the unconsumed lessons/mistakes for the optimizer's promote prompt. */
-export function journalDigest(limit = 40): string {
-  const fresh = readJournal().filter((e) => !e.consumed).slice(-limit);
+/** Digest the unconsumed lessons/mistakes for the optimizer's promote prompt. Pass a model
+ *  key to digest only that model's lessons (so the edit targets the right model's failures). */
+export function journalDigest(model?: string, limit = 40): string {
+  const fresh = readJournal().filter((e) => !e.consumed && (!model || e.model === model)).slice(-limit);
   if (!fresh.length) return "";
   const lessons = fresh.map((e) => e.lesson).filter(Boolean);
   const mistakes = fresh.flatMap((e) => e.mistakes);

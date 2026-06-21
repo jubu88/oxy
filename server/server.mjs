@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
+import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
 import { sanitizeFileContent, sanitizeProject, verifyProject } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
@@ -253,29 +254,28 @@ async function designSystemsList() {
 let promoteRunning = false;
 let promoteStartedAt = 0; // when the current/last auto-promote spawned (for the UI timer)
 let activeBuilds = 0;
-function maybeAutoPromote(fresh) {
+function maybeAutoPromote(model, fresh) {
   const every = Number(process.env.OXY_PROMOTE_EVERY) || 10;
   if (!shouldAutoPromote({ fresh, every, promoteRunning, activeBuilds, disabled: process.env.OXY_AUTO_PROMOTE === "0" })) return;
   promoteRunning = true;
   promoteStartedAt = Date.now();
-  let model = "";
-  try {
-    model = readSettings().llamaModels[0] || "";
-  } catch {}
+  // benchmark + deploy for the model that just built (so its skill is learned from ITS own
+  // lessons and validated on ITS own behavior) — falls back to the E2B default.
+  const target = model || DEFAULT_MODELS[0];
   const logPath = path.join(OXY_HOME, "auto-promote.log");
   let out = "ignore";
   try {
     fs.mkdirSync(OXY_HOME, { recursive: true });
     out = fs.openSync(logPath, "a");
   } catch {}
-  console.log(`[oxy] auto-promote: ${fresh} journaled builds ≥ ${every} — running a GATED skill review in the background (benchmark-validated). Log: ${logPath}`);
+  console.log(`[oxy] auto-promote: ${fresh} journaled ${modelKey(target)} builds ≥ ${every} — running a GATED skill review for ${modelKey(target)} in the background (benchmark-validated). Log: ${logPath}`);
   try {
     const child = spawn(process.execPath, [path.join(ROOT, "skillopt", "promote.ts")], {
       cwd: ROOT,
       env: {
         ...process.env,
         OXY_ENGINE: "llama-server",
-        OXY_MODEL: model || "hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M",
+        OXY_MODEL: target,
         OXY_OPT_MODEL: process.env.OXY_OPT_MODEL || "gpt-oss:120b-cloud",
         // gate on a COMBINED easy+hard benchmark: the easy set alone is saturated (~0.93)
         // and can't tell a good skill from a verbose one — measured, the model regressed on
@@ -1089,6 +1089,10 @@ export async function codelabHandler(req, res, next) {
         // dynamic imports keep native modules out of Vite's config-load bundling
         const { runAgent, HttpToolExecutor, createProject } = await import("../agent/index.ts");
         const features = readSettings().features;
+        // the effective model ref that will actually run (llama-server falls back to the E2B
+        // default when none is given) — drives the per-model skill file, journal tag, and steps.
+        const activeModel = body.model || (body.engine === "llama-server" ? DEFAULT_MODELS[0] : "");
+        const mkey = modelKey(activeModel);
         const engine = await engineFromBody(body, features);
         send({ type: "status", message: "loading model…" });
         await engine.ensureReady();
@@ -1116,7 +1120,11 @@ export async function codelabHandler(req, res, next) {
         const executor = new HttpToolExecutor({ baseUrl });
         // use the deployed (e.g. SkillOpt-tuned) skill if present — unless the user
         // turned skills off in Settings (then the loop's built-in default prompt is used).
-        const skillPath = path.resolve(ROOT, "skill", "system.md");
+        // PER-MODEL: prefer skill/<modelKey>.md, else the shared baseline skill/system.md —
+        // so a skill learned/validated on one model isn't forced on a different one.
+        const perModelSkill = path.resolve(ROOT, "skill", `${mkey}.md`);
+        const baselineSkill = path.resolve(ROOT, "skill", "system.md");
+        const skillPath = fs.existsSync(perModelSkill) ? perModelSkill : baselineSkill;
         const systemOverride = features.useSkill !== false && fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : undefined;
         // multimodal attachments (images/audio) from the client — validate the shape
         const attachments = Array.isArray(body.attachments)
@@ -1137,7 +1145,7 @@ export async function codelabHandler(req, res, next) {
           {
             task,
             project,
-            maxIterations: Number(body.maxIterations) || 14,
+            maxIterations: Number(body.maxIterations) || maxStepsFor(activeModel),
             temperature: Number(body.temperature) || 0.6,
             useStitch,
             designStyle: typeof body.design === "string" ? body.design : "",
@@ -1220,9 +1228,11 @@ export async function codelabHandler(req, res, next) {
               try {
                 fileCount = fs.readdirSync(path.join(PROJECTS, project)).filter((f) => !f.startsWith(".codelab")).length;
               } catch {}
-              await reviewBuild({ task, project, toolLog, finished, errors: [], fileCount, iterate }, sup, systemOverride ?? "");
-              // enough fresh lessons banked → self-improve: run the GATED promote (above).
-              maybeAutoPromote(unconsumedCount());
+              await reviewBuild({ task, project, toolLog, finished, errors: [], fileCount, iterate, model: mkey }, sup, systemOverride ?? "");
+              // enough fresh lessons FOR THIS MODEL banked → self-improve it: run the GATED
+              // promote for the model that just built, using only its lessons (no cross-model
+              // contamination — a 12B/Qwen mistake never feeds the E2B skill).
+              maybeAutoPromote(activeModel, unconsumedCount(mkey));
             } catch {
               /* supervisor is best-effort; never affects the build */
             }

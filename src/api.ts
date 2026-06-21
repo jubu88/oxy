@@ -46,6 +46,7 @@ export interface AutoLearnStatus {
   status: {
     found: boolean;
     phase: string;
+    model: string | null;
     finished: boolean;
     deployed: boolean | null;
     outcome: string | null;

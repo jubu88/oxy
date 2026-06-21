@@ -21,6 +21,7 @@ import type { AgentStep } from "../agent/index.ts";
 import type { Engine } from "../engine/engine.ts";
 import { scoreProject, type Task } from "./score.ts";
 import { journalDigest, markAllConsumed, unconsumedCount } from "./supervisor.ts";
+import { modelKey } from "./model-config.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -39,7 +40,12 @@ const CANDIDATE_PATH = process.env.OXY_SO_CANDIDATE || path.join(REPO, "skill", 
 const MAXITER = num(process.env.OXY_SO_MAXITER, 10);
 const VAL_REPEATS = num(process.env.OXY_SO_VAL_REPEATS, 2);
 const MARGIN = num(process.env.OXY_SO_MARGIN, 0.03);
-const SKILL_PATH = path.join(REPO, "skill", "system.md");
+// PER-MODEL: deploy to skill/<modelKey>.md and learn only from THIS model's journal lessons.
+// Seed from the model's own skill if it has one yet, else the shared baseline skill/system.md.
+const MODEL_KEY = modelKey(TARGET_MODEL);
+const BASELINE_SKILL = path.join(REPO, "skill", "system.md");
+const SKILL_PATH = path.join(REPO, "skill", `${MODEL_KEY}.md`);
+const SEED_PATH = existsSync(SKILL_PATH) ? SKILL_PATH : BASELINE_SKILL;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (m: string) => console.log(m);
@@ -96,8 +102,8 @@ async function makeEngine(name: string, model: string): Promise<Engine> {
 }
 
 async function main() {
-  const fresh = unconsumedCount();
-  const digest = journalDigest();
+  const fresh = unconsumedCount(MODEL_KEY);
+  const digest = journalDigest(MODEL_KEY);
   if (!MANUAL && fresh === 0) {
     log("[promote] no new journal lessons — nothing to promote. (run some builds first)");
     process.exit(0);
@@ -114,10 +120,11 @@ async function main() {
   const tasksPath = process.env.OXY_SO_TASKS ? path.resolve(REPO, process.env.OXY_SO_TASKS) : path.join(HERE, "tasks.json");
   const tasksFile = JSON.parse(readFileSync(tasksPath, "utf8"));
   const valTasks: Task[] = tasksFile.val;
-  const seed = existsSync(SKILL_PATH) ? readFileSync(SKILL_PATH, "utf8") : "";
+  const seed = existsSync(SEED_PATH) ? readFileSync(SEED_PATH, "utf8") : "";
 
   log(`\n=== Oxy SkillOpt · gated promote ===`);
-  log(`target: ${TARGET_ENGINE} (${TARGET_MODEL}) · optimizer: ${OPT_ENGINE} (${OPT_MODEL})`);
+  log(`target: ${TARGET_ENGINE} (${TARGET_MODEL}) · model-key: ${MODEL_KEY} · skill: ${path.relative(REPO, SKILL_PATH)} (seed: ${path.relative(REPO, SEED_PATH)})`);
+  log(`optimizer: ${OPT_ENGINE} (${OPT_MODEL})`);
   log(`journal: ${fresh} fresh review(s) · val: ${valTasks.length} · repeats: ${VAL_REPEATS} · margin: ${MARGIN}\n${digest}\n`);
 
   writeStatus({ startedAt: Date.now(), pid: process.pid, finished: false });
@@ -196,14 +203,14 @@ async function main() {
     if (meanOk && noRegression) {
       writeFileSync(SKILL_PATH, candidate.endsWith("\n") ? candidate : candidate + "\n", "utf8");
       deployed = true;
-      log(`[promote] ACCEPTED ✅ — deployed to skill/system.md`);
+      log(`[promote] ACCEPTED ✅ — deployed to ${path.relative(REPO, SKILL_PATH)}`);
     } else {
       log(`[promote] rejected — skill/system.md unchanged`);
     }
   }
   // the lessons were considered (accepted or not) — clear them so the next promote
   // works on genuinely new feedback rather than re-proposing the same edit.
-  markAllConsumed();
+  markAllConsumed(MODEL_KEY);
   // consume the manual candidate so a re-run doesn't blindly re-apply it
   if (MANUAL) rmSync(CANDIDATE_PATH, { force: true });
 

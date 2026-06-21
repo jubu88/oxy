@@ -94,6 +94,15 @@ journal: 11 fresh review(s) · val: 10 · repeats: 1 · margin: 0.03
   assert.equal(p.total, 10); // only the base pass counts
 });
 
+test("extracts the model-key (which model's skill is being improved)", () => {
+  const st = parseAutoPromoteLog(`${HEAD}
+target: llama-server (hf:unsloth/gemma-4-E2B-it-GGUF:Q4_K_M) · model-key: gemma-4-e2b · skill: skill/gemma-4-e2b.md (seed: skill/system.md)
+journal: 10 fresh review(s) · val: 10 · repeats: 1 · margin: 0.03
+[promote] current skill val: 0.916
+`);
+  assert.equal(st.model, "gemma-4-e2b");
+});
+
 test("empty / no run logged → found:false", () => {
   assert.equal(parseAutoPromoteLog("").found, false);
   assert.equal(parseAutoPromoteLog("some unrelated text\n").found, false);

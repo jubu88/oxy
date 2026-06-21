@@ -65,7 +65,7 @@ export function AutoLearn() {
     <section className={"autolearn" + (running ? " running" : "")}>
       <button type="button" className="al-head" onClick={() => setOpen((o) => !o)} title="continuous skill improvement from your real builds">
         <span className={"al-dot" + (running ? " on" : "")} />
-        <span className="al-title">Auto-learn</span>
+        <span className="al-title">Auto-learn{st.model ? ` · ${st.model}` : ""}</span>
         <span className={"al-state" + (running ? "" : " muted")}>{running ? PHASE_LABEL[st.phase] ?? st.phase : resultText}</span>
         <span className="al-spacer" />
         {running && elapsed != null && <span className="al-timer">{fmtClock(elapsed)}</span>}

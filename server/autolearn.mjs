@@ -10,6 +10,7 @@ export function parseAutoPromoteLog(text) {
   const st = {
     found: false,
     phase: "idle", // starting | reviewing | scoring-current | optimizing | scoring-candidate | done
+    model: null, // which model's skill is being improved (modelKey)
     finished: false,
     deployed: null, // true=accepted, false=rejected/no-change, null=undecided
     outcome: null, // "skill improved" | "no change" | null
@@ -35,7 +36,9 @@ export function parseAutoPromoteLog(text) {
   let bucket = null; // where indented "task: score (runs)" lines land
   for (const line of lines.slice(start)) {
     let m;
-    if ((m = line.match(/journal:\s*(\d+)\s*fresh.*?val:\s*(\d+).*?repeats:\s*(\d+)/))) {
+    if ((m = line.match(/model-key:\s*([a-z0-9.\-]+)/))) {
+      st.model = m[1];
+    } else if ((m = line.match(/journal:\s*(\d+)\s*fresh.*?val:\s*(\d+).*?repeats:\s*(\d+)/))) {
       st.reviewed = Number(m[1]);
       st.valTotal = Number(m[2]);
       st.repeats = Number(m[3]);

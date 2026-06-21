@@ -191,24 +191,24 @@ that every build reads. Oxy improves it two ways, **watch-always, deploy-gated**
   validation, a margin, and no per-task regression). The model weights never change;
   only the text does — and it can never get silently worse.
 
-So the full loop is: **you build → a supervisor journals one lesson per build →** once
-**`OXY_PROMOTE_EVERY`** (default 10) fresh lessons pile up, **a gated promote runs in
-the background:** it benchmarks the current skill, asks a strong optimizer for one
-journal-informed edit, benchmarks that candidate, and **deploys it only on a strict
-win.** The **Auto-learn panel** in the UI makes this visible — it shows when a promote
-is running, its progress + timer, the current-vs-candidate scores, the pass/fail
-outcome, and the lessons mined from your builds, so the self-improvement isn't a black
-box. The promote runs in the background, never during a build, on a separate model
-port so it won't disturb a build you're running.
+So the full loop is: **you build → a supervisor journals one lesson per build (tagged
+with the model that ran it) →** once **`OXY_PROMOTE_EVERY`** (default 10) fresh lessons
+**for that model** pile up, **a gated promote runs for that model:** using only its
+lessons, it benchmarks on that model, asks a strong optimizer for one edit, benchmarks
+the candidate, and **deploys to that model's own skill file only on a strict win.** The
+**Auto-learn panel** in the UI makes this visible — which model it's improving, progress
++ timer, current-vs-candidate scores, the pass/fail outcome, and the mined lessons — so
+the self-improvement isn't a black box. It runs in the background, never during a build,
+on a separate model port so it won't disturb a build you're running.
 
-> **Skills are tuned for gemma4 E2B.** The benchmark gate runs every candidate on the
-> **default model (gemma4 E2B)** — so a deployed skill is one *measured* to help **that**
-> model. In principle a better prompt helps any model, but Oxy can't run the benchmark
-> on every model you might pick, so on **other models a learned skill is unverified**: it
-> may help, or occasionally hurt. Flip **Use the learned skill** off in Settings to fall
-> back to the neutral built-in prompt on a model you haven't validated. (Note too: a ~2B
-> model degrades with a longer prompt, so the skill is deliberately kept *lean* — more
-> rules dilute its attention.)
+> **Skills are per-model.** Each model learns and is validated on its **own** skill file
+> (`skill/<model>.md`), so a lesson from a 12B or Qwen build never gets folded into the
+> E2B skill (we hit exactly that — cross-model lessons regressed E2B, and the gate caught
+> it). A model that hasn't learned its own skill yet falls back to the shared baseline
+> (`skill/system.md`), which is E2B-tuned — so on a fresh model that fallback is
+> *unverified* until it learns its own. Flip **Use the learned skill** off in Settings to
+> use the neutral built-in prompt instead. (And a ~2B degrades with a longer prompt, so
+> skills are kept *lean* — more rules dilute its attention.)
 
 Or run the promote by hand:
 
