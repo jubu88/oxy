@@ -1053,6 +1053,7 @@ export async function codelabHandler(req, res, next) {
         let lastTok = 0;
         const toolLog = []; // for the continuous-improvement supervisor review
         let finished = false;
+        let loopStopped = false; // the loop already emitted a "stopped: …" reason (e.g. no-tool-calls) — don't also say "step limit"
         await runAgent(
           {
             task,
@@ -1074,7 +1075,10 @@ export async function codelabHandler(req, res, next) {
             engine,
             executor,
             signal: ac.signal,
-            onNotice: (message) => send({ type: "status", message }), // surface a managed-engine reboot instead of a silent freeze
+            onNotice: (message) => {
+              if (message.startsWith("stopped")) loopStopped = true; // loop gave a real stop reason → suppress the generic step-limit line below
+              send({ type: "status", message });
+            },
             onStep: (s) => {
               for (const t of s.toolCalls) toolLog.push(t.name);
               if (s.done) finished = true;
@@ -1093,7 +1097,7 @@ export async function codelabHandler(req, res, next) {
         );
         // a build that ran out of turns without the model calling done isn't an error, but
         // it shouldn't look like a silent stop either — say so (the files are still saved).
-        if (!finished && !ac.signal.aborted) send({ type: "status", message: "stopped: reached the step limit before finishing — your files are saved; iterate to continue" });
+        if (!finished && !loopStopped && !ac.signal.aborted) send({ type: "status", message: "stopped: reached the step limit before finishing — your files are saved; iterate to continue" });
         // post-build static verify: surface what couldn't be auto-fixed (JS syntax errors,
         // links to files that don't exist) so the user knows what one more iterate would fix.
         const verifyIssues = verifyProject(path.join(PROJECTS, project));
