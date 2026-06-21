@@ -75,13 +75,28 @@ export function codeBlocksToWrites(content: string, names: Set<string>): ToolCal
   const best = new Map<string, string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(content))) {
-    const file = FILE_FOR_LANG[(m[1] ?? "").toLowerCase()];
+    const lang = (m[1] ?? "").toLowerCase();
+    const file = FILE_FOR_LANG[lang];
     if (!file) continue;
     const body = (m[2] ?? "").trim();
     if (body.length < 40) continue; // skip tiny snippets / inline examples
+    if (!hasRealCode(lang, body)) continue; // placeholder-only block (e.g. "// add logic here") — not a real file
     if (!best.has(file) || body.length > (best.get(file) as string).length) best.set(file, body);
   }
   return [...best.entries()].map(([path, body]) => ({ name: "write_file", arguments: { path, content: body } }));
+}
+
+/** Does a recovered block contain actual code, or is it just comments/whitespace? A
+ *  coder model sometimes emits a stub like "// add the logic here" — manufacturing a
+ *  file from that is worse than nothing (it counts as written but does nothing). Strip
+ *  the language's comments and check something real remains. Only used to GATE recovery,
+ *  never to alter saved content, so over-keeping (e.g. a `//` inside a URL) is harmless. */
+function hasRealCode(lang: string, body: string): boolean {
+  let s = body;
+  if (lang === "css") s = s.replace(/\/\*[\s\S]*?\*\//g, "");
+  else if (lang === "html" || lang === "htm") s = s.replace(/<!--[\s\S]*?-->/g, "");
+  else s = s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"); // js: block + line comments (keep ://)
+  return s.trim().length > 0;
 }
 
 /** Split a reasoning model's <think>…</think> trace out of the visible content. */

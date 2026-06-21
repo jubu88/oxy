@@ -50,6 +50,14 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   const toolNames = new Set(tools.map((t) => t.name)); // for recovering coder-style code blocks as writes
   const system = buildSystem(config.useStitch, config.systemOverride);
 
+  // Files known to exist on disk (lowercased, top-level-normalized). Drives the
+  // done-guard below: the build can't FINISH without a renderable entry page
+  // (index.html), regardless of the order files were written in. Seeded from disk
+  // on iterate, unioned on compaction, and updated on every successful write_file.
+  const filesPresent = new Set<string>();
+  const normPath = (p: unknown) =>
+    String(p ?? "").trim().replace(/\\/g, "/").replace(/^\.?\/+/, "").toLowerCase();
+
   // The user pre-picked a design system? Fetch its tokens now and inject them so the
   // model uses them directly — skipping the get_design_system turn. Fresh builds only.
   let designSeed = "";
@@ -76,6 +84,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     } catch {
       /* none yet */
     }
+    for (const f of files) filesPresent.add(normPath(f.path)); // seed the done-guard from what's already on disk
     initialUser = iteratePrompt(config.task, files, config.projectGoal);
   } else {
     initialUser =
@@ -123,6 +132,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     } catch {
       /* seed still carries goal + toolLog */
     }
+    for (const f of files) filesPresent.add(normPath(f.path)); // keep the done-guard's view current after a reseed
     const checkpoint: Checkpoint = {
       version: 1,
       project: config.project,
@@ -151,6 +161,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   }
 
   let consecutiveNoAction = 0; // give up if a weak model can't emit tool calls turn after turn
+  let doneBlocked = 0; // times we refused `done` for a missing index.html (bounded so a build is never trapped)
   for (let i = 0; i < config.maxIterations; i++) {
     if (signal?.aborted) return;
     const ranWithThink = thinkNext; // freeze the one-shot burst flag for this turn
@@ -219,6 +230,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
       toolCalls.push({ name, args, result });
       // accumulate deterministic state for a possible compaction (ground truth, no extra model call)
       toolLog.push(`${name} ${args.path || args.style || args.name || ""}`.trim());
+      if (name === "write_file" && !result.startsWith("error:")) filesPresent.add(normPath(args.path));
       if (name === "get_design_system" && !result.startsWith("Unknown")) styleChosen = String(args.style || "").toLowerCase();
       if (name === "review_design" && result.startsWith("DESIGN CRITIQUE:")) lastCritique = result.slice(0, 700);
       // read_file gets a larger budget so the model sees enough of a big file
@@ -239,7 +251,35 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
       }
     }
 
-    const isDone = toolCalls.some((t) => t.name === "done");
+    let isDone = toolCalls.some((t) => t.name === "done");
+    // Refuse to FINISH without a renderable entry page. A weak/coder model sometimes
+    // writes only app.js/style.css (or a placeholder) and calls done — leaving a project
+    // that can't render ("not found"). The order files are written in doesn't matter, only
+    // that index.html exists by the time the model finishes. We track writes in-loop (fast
+    // path) and, only when that view lacks index.html, do ONE authoritative disk check
+    // before refusing (covers resume / tracking gaps). Bounded so a model that truly can't
+    // produce it isn't trapped — the post-build check then flags the missing page.
+    if (isDone && doneBlocked < 3 && !filesPresent.has("index.html")) {
+      let hasIndex = false;
+      try {
+        const listed = await executor.call("list_files", {}, ctx);
+        const onDisk = JSON.parse(typeof listed === "string" ? listed : listed.text) as FileEntry[];
+        hasIndex = onDisk.some((f) => normPath(f.path) === "index.html");
+      } catch {
+        hasIndex = true; // can't verify (infra error) — don't trap the build on it
+      }
+      if (hasIndex) {
+        filesPresent.add("index.html");
+      } else {
+        isDone = false;
+        doneBlocked++;
+        messages.push({
+          role: "user",
+          content:
+            "You called done, but no index.html exists yet — the app has no entry page and will not render. Before finishing you MUST create index.html with write_file: a COMPLETE HTML document — <!DOCTYPE html>, a <head> that links any style.css/app.js you wrote, and a <body> with the real UI. Write index.html now, then call done.",
+        });
+      }
+    }
     // estimate the prefill the NEXT turn will carry: what the engine just counted +
     // what it generated + the tool results we just appended. Fall back to a
     // (deliberately high) char estimate if promptEvalCount is unavailable.

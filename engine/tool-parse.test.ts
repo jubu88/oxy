@@ -57,6 +57,17 @@ test("codeBlocksToWrites ignores tiny snippets and unknown languages", () => {
   assert.deepEqual(codeBlocksToWrites("```python\nprint('this is a long enough python snippet to pass')\n```", KNOWN), []); // unmapped lang
 });
 
+test("codeBlocksToWrites ignores comment-only placeholder blocks (no stub files)", () => {
+  // the exact Qwen-3B failure: a ```js block that's just a placeholder comment
+  assert.deepEqual(codeBlocksToWrites("```js\n// Add JavaScript logic for dashboard, payments, statements and settings here\n```", KNOWN), []);
+  assert.deepEqual(codeBlocksToWrites("```css\n/* put the real styles here later, this is only a placeholder */\n```", KNOWN), []);
+  assert.deepEqual(codeBlocksToWrites("```html\n<!-- the full page markup goes here once it is actually written -->\n```", KNOWN), []);
+  // but a comment ALONGSIDE real code is still recovered (and a URL's // isn't mistaken for a comment)
+  const r = codeBlocksToWrites("```js\n// init\nfetch('https://api.example.com/x').then((r) => r.json());\n```", KNOWN);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].arguments.path, "app.js");
+});
+
 test("codeBlocksToWrites is a no-op when write_file isn't a known tool", () => {
   assert.deepEqual(codeBlocksToWrites("```html\n<!DOCTYPE html><html><body>plenty of content here</body></html>\n```", new Set(["done"])), []);
 });

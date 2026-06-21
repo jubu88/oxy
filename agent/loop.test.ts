@@ -144,6 +144,43 @@ test("recovers a coder model's ```html code block as a write_file (adapter)", as
   assert.match(write!.args.content, /<!DOCTYPE html>/);
 });
 
+test("refuses done until index.html exists, then accepts it (order-independent entry-page guard)", async () => {
+  const engine = new FakeEngine([
+    { toolCalls: [tc("write_file", { path: "app.js", content: "console.log('a fairly long line of genuine code here');" })] }, // turn0: only app.js
+    { toolCalls: [tc("done", { summary: "done too early" })] }, // turn1: premature done -> must be refused
+    { toolCalls: [tc("write_file", { path: "index.html", content: "<!DOCTYPE html><html><body>ok</body></html>" })] }, // turn2: writes the entry page
+    { toolCalls: [tc("done", { summary: "now complete" })] }, // turn3: now accepted
+  ]);
+  let wroteIndex = false;
+  const executor = new FakeExecutor((name, args) => {
+    if (name === "write_file" && args.path === "index.html") wroteIndex = true; // let the default "wrote …" result through
+    if (name === "list_files") return JSON.stringify(wroteIndex ? [{ path: "index.html", bytes: 50 }, { path: "app.js", bytes: 40 }] : [{ path: "app.js", bytes: 40 }]);
+    return undefined;
+  });
+  const steps: AgentStep[] = [];
+  await runAgent(baseConfig(), { engine, executor, onStep: (s) => steps.push(s) });
+
+  assert.equal(steps[1].done, false, "done must be refused while index.html is missing");
+  // the model got a corrective nudge (seen at the start of turn2) telling it to write index.html
+  assert.ok(engine.seenMessages[2].some((m) => m.role === "user" && /index\.html/i.test(m.content) && /write_file/i.test(m.content)));
+  // after index.html was written, the later done WAS accepted and ended the run
+  assert.equal(steps.at(-1)!.done, true);
+  assert.equal(engine.callIndex, 4, "should end right after the valid done");
+});
+
+test("accepts done when index.html is on disk but wasn't written this session (iterate/edit case)", async () => {
+  // model only edits, never write_file's index.html — but it already exists on disk
+  const engine = new FakeEngine([
+    { toolCalls: [tc("edit_file", { path: "index.html", old_string: "a", new_string: "b" })] },
+    { toolCalls: [tc("done", { summary: "tweaked" })] },
+  ]);
+  const executor = new FakeExecutor((name) => (name === "list_files" ? JSON.stringify([{ path: "index.html", bytes: 999 }]) : undefined));
+  const steps: AgentStep[] = [];
+  await runAgent(baseConfig(), { engine, executor, onStep: (s) => steps.push(s) });
+  assert.equal(steps.at(-1)!.done, true, "done allowed: the authoritative disk check finds index.html");
+  assert.equal(engine.callIndex, 2);
+});
+
 test("stops early after 3 dead turns with no tool call (weak model can't drive the loop)", async () => {
   const engine = new FakeEngine([{ content: "I will plan my approach carefully." }]); // never a tool call, no code
   const notices: string[] = [];
