@@ -80,7 +80,7 @@ export function toReviewEntry(b: BuildSummary, raw: string, now: number): Review
 }
 
 function reviewPrompt(b: BuildSummary, skill: string): string {
-  return `You supervise a SMALL local model that builds web apps by calling tools (write_file, edit_file, get_design_system, get_icon, generate_image, review_design, done). Review ONE build and extract lessons to improve its SYSTEM instructions (the "skill").
+  return `You supervise a SMALL local model that builds web apps by calling tools: write_file, edit_file, read_file, list_files, get_design_system, get_icon, get_reference, generate_image, design_with_stitch, review_design, check_app, done. These are ALL legitimate — get_reference pulls correct library API patterns (Supabase / React / web-components), check_app verifies the page in a real browser, design_with_stitch generates a cloud design; do NOT flag their appropriate use as a mistake (only over-use, e.g. looping check_app, is wrong). Review ONE build and extract lessons to improve its SYSTEM instructions (the "skill").
 
 CURRENT SKILL (for context — do not repeat it back):
 """
