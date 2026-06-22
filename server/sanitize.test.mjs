@@ -149,6 +149,25 @@ test("verifyProject: top-level await flagged for a classic script, but NOT once 
   fs.rmSync(moduled, { recursive: true, force: true });
 });
 
+test("verifyProject flags a custom element defined-but-never-placed (the empty star-rating bug)", () => {
+  const dir = tmpProject({
+    "index.html": `<div id="c"><!-- the element goes here --></div><script src="app.js"></script>`,
+    "app.js": `class StarRating extends HTMLElement {} customElements.define("star-rating", StarRating);`,
+  });
+  const issues = verifyProject(dir);
+  assert.ok(issues.some((i) => /star-rating.*defined but never used/i.test(i)), issues.join(" | "));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyProject is clean when the custom element IS placed in the HTML", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    "app.js": `customElements.define("star-rating", class extends HTMLElement {});`,
+  });
+  assert.deepEqual(verifyProject(dir).filter((i) => /custom element/i.test(i)), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---- injectSupabaseConfig (filesystem) ----
 
 test("injectSupabaseConfig fills the URL/anon-key consts + createClient literals", () => {

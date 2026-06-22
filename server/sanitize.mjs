@@ -249,6 +249,23 @@ export function verifyProject(projectDir) {
         issues.push(`index.html references "${ref}" but that file was never created`);
       }
     }
+    // a custom element DEFINED in JS but never PLACED in the HTML => the page renders empty
+    // (a common "scaffolded but left a placeholder comment" failure — exactly the star-rating WC bug).
+    const defined = new Set();
+    for (const f of files) {
+      if (!/\.(js|mjs|cjs)$/i.test(f)) continue;
+      let code = "";
+      try {
+        code = fs.readFileSync(path.join(projectDir, f), "utf8");
+      } catch {
+        continue;
+      }
+      for (const m of code.matchAll(/customElements\.define\(\s*["'`]([a-z][a-z0-9-]*-[a-z0-9-]*)["'`]/gi)) defined.add(m[1].toLowerCase());
+    }
+    const htmlLc = html.toLowerCase();
+    for (const tag of defined) {
+      if (!htmlLc.includes(`<${tag}`)) issues.push(`custom element <${tag}> is defined but never used in index.html — the page renders empty; add <${tag}></${tag}> where it should appear`);
+    }
   }
   return issues;
 }

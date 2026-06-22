@@ -4,7 +4,10 @@ Custom elements + shadow DOM run as-is in the browser — no framework, no bundl
 for reusable, encapsulated widgets in a plain HTML/JS app.
 
 ## define
-Define a custom element class and register it. The tag MUST contain a hyphen.
+Define a custom element class and register it. The tag MUST contain a hyphen. CRITICAL:
+you must also PLACE the element in index.html — `<my-counter></my-counter>`. Defining it
+without putting the tag on the page renders NOTHING (a blank page). Never leave a "the
+component goes here" comment instead of the real tag.
 ```js
 class MyCounter extends HTMLElement {
   connectedCallback() { this.render(); }
@@ -13,6 +16,7 @@ class MyCounter extends HTMLElement {
 customElements.define("my-counter", MyCounter);
 ```
 ```html
+<!-- in index.html — actually place the element, don't just define it: -->
 <my-counter></my-counter>
 ```
 
