@@ -168,6 +168,25 @@ test("verifyProject is clean when the custom element IS placed in the HTML", () 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("verifyProject flags attributeChangedCallback without observedAttributes (click-does-nothing WC bug)", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    "app.js": `class S extends HTMLElement { attributeChangedCallback(){ this.render(); } onClick(v){ this.setAttribute("value", v); } } customElements.define("star-rating", S);`,
+  });
+  const issues = verifyProject(dir);
+  assert.ok(issues.some((i) => /observedAttributes/i.test(i)), issues.join(" | "));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyProject is clean when observedAttributes IS declared", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    "app.js": `class S extends HTMLElement { static get observedAttributes(){ return ["value"]; } attributeChangedCallback(){ this.render(); } } customElements.define("star-rating", S);`,
+  });
+  assert.deepEqual(verifyProject(dir).filter((i) => /observedAttributes/i.test(i)), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---- injectSupabaseConfig (filesystem) ----
 
 test("injectSupabaseConfig fills the URL/anon-key consts + createClient literals", () => {

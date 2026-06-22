@@ -261,6 +261,12 @@ export function verifyProject(projectDir) {
         continue;
       }
       for (const m of code.matchAll(/customElements\.define\(\s*["'`]([a-z][a-z0-9-]*-[a-z0-9-]*)["'`]/gi)) defined.add(m[1].toLowerCase());
+      // a Web Component that uses attributeChangedCallback but never declares static
+      // observedAttributes => the callback NEVER fires, so setAttribute-driven re-renders
+      // (e.g. click-to-rate) silently do nothing. A very common WC footgun.
+      if (/\battributeChangedCallback\b/.test(code) && !/\bobservedAttributes\b/.test(code)) {
+        issues.push(`${f}: defines attributeChangedCallback but not static observedAttributes — attribute changes won't fire it, so setAttribute-driven updates (e.g. click-to-rate) won't re-render. Declare static get observedAttributes(){return ['value']} or update the DOM directly in the handler.`);
+      }
     }
     const htmlLc = html.toLowerCase();
     for (const tag of defined) {

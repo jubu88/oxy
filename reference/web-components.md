@@ -43,7 +43,12 @@ customElements.define("my-card", MyCard);
 
 ## attributes
 React to attribute changes with `observedAttributes` + `attributeChangedCallback`.
-Mirror important props to attributes so they're reactive.
+CRITICAL: `attributeChangedCallback` ONLY fires for attributes listed in `observedAttributes`
+— if you omit it, the callback NEVER runs and `setAttribute` does nothing visible (a classic
+bug). For internal state from a user action (e.g. a click sets the rating), the simplest,
+reliable pattern is to update state + re-render DIRECTLY in the click handler — don't round-trip
+through `setAttribute` unless you've declared `observedAttributes`. The callback signature is
+`attributeChangedCallback(name, oldValue, newValue)` — all three are strings.
 ```js
 class StarRating extends HTMLElement {
   static get observedAttributes() { return ["value"]; }
