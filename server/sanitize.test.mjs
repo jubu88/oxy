@@ -187,6 +187,16 @@ test("verifyProject is clean when observedAttributes IS declared", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("verifyProject does NOT flag a dead attributeChangedCallback when the component re-renders directly", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    // click calls updateRating directly (no this.setAttribute round-trip) — the leftover callback is harmless
+    "app.js": `class S extends HTMLElement { attributeChangedCallback(){ this.render(); } onClick(v){ this.updateRating(v); } updateRating(){} } customElements.define("star-rating", S);`,
+  });
+  assert.deepEqual(verifyProject(dir).filter((i) => /observedAttributes/i.test(i)), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---- injectSupabaseConfig (filesystem) ----
 
 test("injectSupabaseConfig fills the URL/anon-key consts + createClient literals", () => {
