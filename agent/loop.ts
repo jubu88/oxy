@@ -18,7 +18,7 @@
 // and native tool calls now arrive as GenerateResult.toolCalls (already {name,
 // arguments}) instead of Ollama's {function:{…}} shape.
 import type { Engine, ChatMessage, GenerateResult } from "../engine/engine.ts";
-import type { AgentConfig, AgentProgress, AgentStep, Checkpoint, FileEntry, ToolCallRecord, ToolExecutor } from "./types.ts";
+import type { AgentConfig, AgentProgress, AgentStep, Checkpoint, FileEntry, ToolCallRecord, ToolExecutor, ToolResult } from "./types.ts";
 import { buildSystem, buildTools } from "./tools.ts";
 import { codeBlocksToWrites } from "../engine/tool-parse.ts";
 import { CHECKPOINT_FILE, COMPACT_TRIGGER, estTokens, MAX_COMPACTIONS, resumePrompt, SEED_CEILING } from "./compaction.ts";
@@ -162,6 +162,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
 
   let consecutiveNoAction = 0; // give up if a weak model can't emit tool calls turn after turn
   let doneBlocked = 0; // times we refused `done` for a missing index.html (bounded so a build is never trapped)
+  let checkAppStreak = 0; // consecutive check_app calls with no fix between — a weak model sometimes spins on it
   for (let i = 0; i < config.maxIterations; i++) {
     if (signal?.aborted) return;
     const ranWithThink = thinkNext; // freeze the one-shot burst flag for this turn
@@ -224,7 +225,16 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     for (const tc of rawToolCalls) {
       const name = tc.name;
       const args = typeof tc.arguments === "string" ? safeParse(tc.arguments) : tc.arguments ?? {};
-      const raw = await executor.call(name, args, ctx);
+      // a weak model sometimes SPINS on check_app (re-checks without ever fixing) and burns the
+      // whole step budget — the skill says check ONCE. Allow a couple, then skip the (slow)
+      // browser run and push it to act. A real fix (write_file/edit_file) resets the streak.
+      let raw: string | ToolResult;
+      if (name === "check_app" && ++checkAppStreak > 2) {
+        raw = "check_app skipped — you've already checked the app several times without changing anything. STOP checking: make ONE concrete fix with edit_file, or call done if it already works.";
+      } else {
+        raw = await executor.call(name, args, ctx);
+        if (name === "write_file" || name === "edit_file") checkAppStreak = 0;
+      }
       const result = typeof raw === "string" ? raw : raw.text; // a tool may return {text, image}
       const image = typeof raw === "string" ? undefined : raw.image;
       toolCalls.push({ name, args, result });
@@ -328,6 +338,14 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     }
 
     emit(compacted);
+
+    // stuck re-checking without changing anything (a check_app spin) — give up rather than
+    // burn the rest of the budget re-rendering the same broken page (the +8 library budget
+    // makes this worse). The cap above already stops executing them; this ends the build.
+    if (checkAppStreak > 5) {
+      onNotice?.("stopped: the model kept re-checking the app without changing anything — it can't make progress here. Iterate with a specific fix.");
+      return;
+    }
 
     // a turn with no tool calls and no done — nudge once (but not right after a reseed,
     // whose seed already directs the next steps). If the model rambled in prose

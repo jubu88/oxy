@@ -189,6 +189,32 @@ test("stops early after 3 dead turns with no tool call (weak model can't drive t
   assert.ok(notices.some((n) => /no tool calls/i.test(n)), "should surface why it stopped");
 });
 
+test("rate-limits then stops a check_app spin (weak model re-checks without ever fixing)", async () => {
+  const engine = new FakeEngine([{ toolCalls: [tc("check_app")] }]); // always check_app, never edits/done
+  const executor = new FakeExecutor();
+  const notices: string[] = [];
+  await runAgent(baseConfig({ maxIterations: 20 }), { engine, executor, onStep: () => {}, onNotice: (m) => notices.push(m) });
+  const checks = executor.calls.filter((c) => c.name === "check_app").length;
+  assert.ok(checks <= 2, `check_app executions should be capped (got ${checks})`);
+  assert.ok(engine.callIndex <= 7, `should give up on a check spin, not run all 20 (ran ${engine.callIndex})`);
+  assert.ok(notices.some((n) => /re-check/i.test(n)), "should surface why it stopped");
+});
+
+test("a real fix (edit_file) resets the check_app streak so check→fix→check is allowed", async () => {
+  const engine = new FakeEngine([
+    { toolCalls: [tc("write_file", { path: "index.html", content: "<html>x</html>" })] },
+    { toolCalls: [tc("check_app")] },
+    { toolCalls: [tc("edit_file", { path: "index.html", old_string: "x", new_string: "y" })] },
+    { toolCalls: [tc("check_app")] },
+    { toolCalls: [tc("done", { summary: "ok" })] },
+  ]);
+  const executor = new FakeExecutor();
+  await runAgent(baseConfig(), { engine, executor, onStep: () => {} });
+  // both check_app calls executed (the edit between them reset the streak), and the build finished
+  assert.equal(executor.calls.filter((c) => c.name === "check_app").length, 2);
+  assert.ok(executor.calls.some((c) => c.name === "done"));
+});
+
 test("respects maxIterations when the model never calls done", async () => {
   const engine = new FakeEngine([{ toolCalls: [tc("write_file", { path: "index.html", content: "x" })] }]);
   const steps: AgentStep[] = [];
