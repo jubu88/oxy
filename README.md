@@ -28,10 +28,9 @@ apps — Oxy just doesn't *require* one. (On low-end hardware large models are i
 anyway — a 7B crawls and a 12B barely runs there; see [Performance](#performance-verified) —
 which is exactly why getting the most out of a small model is the goal.)
 
-**Web is the focus today.** The same machinery is meant to extend later to other
-targets (**Android / iOS**), each with its **own skill file** and a web/android/ios
-selector in the UI — though native mobile on a ~2B model is an open question, not a
-promise. See [Roadmap](#roadmap).
+**Small web apps — by design.** That's the sweet spot for a tiny local model, so
+that's where all the effort goes. Oxy isn't trying to be a mobile or desktop app
+builder; it does one thing — build nice little web apps well on modest hardware.
 
 ## What you can do
 
@@ -249,8 +248,8 @@ npm run build    # type-check + production bundle
 
 ## Roadmap
 
-Oxy is still early; the throughline is **deepening the small model's web expertise**
-before widening scope.
+Oxy is still early; the throughline is **deepening the small model's web expertise** —
+making it better at the web apps it already builds, not widening into new platforms.
 
 - **RAG for real libraries — shipped, expanding.** A curated, surgical reference
   (`reference/*.md`, served by the `get_reference` tool) lets the model write correct
@@ -264,10 +263,6 @@ before widening scope.
   hook, state and routing patterns run in Oxy's static iframe via a CDN SPA. A true Vite
   build (or Next's SSR) needs a bundler/server runtime Oxy doesn't have yet — the
   bottleneck there is the *runtime*, not the model's knowledge.
-- **Other platforms (later, aspirational).** Android (Kotlin Compose) / iOS (Swift)
-  would each get their **own skill file** and benchmark, picked via a web/android/ios
-  selector in the UI. Native mobile on a tiny local model is an open question — kept in
-  mind, not promised. Web stays the focus.
 
 See [PLAN.md](PLAN.md) and [DESIGN.md](DESIGN.md) for deeper notes.
 

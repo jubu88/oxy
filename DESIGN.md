@@ -46,21 +46,7 @@ read before editing, prefer `edit_file`, keep what works. This is the same
 seeding pattern as the compaction resume, and it's the foundation backends build
 on (generate manifest → iterate file by file).
 
-## 3. Mobile (iOS / Android) — keep the loop platform-neutral
-
-The agent loop and the `Engine` interface are already platform-agnostic; only the
-**tools** and the **preview** are web-specific. To reach mobile without a rewrite:
-
-- Keep `agent/` and `engine/` untouched. Add a **mobile tool profile** (a
-  different `ToolDef` set + system prompt) and a **target adapter** that scaffolds
-  a web-tech app shell — **Capacitor or Expo** — so the model still writes
-  HTML/JS/TS into a jail, and the shell wraps it as a native app.
-- The **preview** becomes the platform-specific part: a device-frame web preview
-  for the webview layer now; a simulator/emulator hook later.
-- Same compaction/burst/spec machinery; the difference is the project template
-  and the build/preview tools, not the brain.
-
-## 4. MCP tools — curated now, generic later (recommendation)
+## 3. MCP tools — curated now, generic later (recommendation)
 
 Should arbitrary MCP servers be exposed to the model? **Not yet.**
 
