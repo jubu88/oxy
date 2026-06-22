@@ -163,6 +163,7 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
   let consecutiveNoAction = 0; // give up if a weak model can't emit tool calls turn after turn
   let doneBlocked = 0; // times we refused `done` for a missing index.html (bounded so a build is never trapped)
   let checkAppStreak = 0; // consecutive check_app calls with no fix between — a weak model sometimes spins on it
+  let editStreak = 0; // consecutive edit_file calls with no check/done/write — a weak model sometimes edits in circles
   for (let i = 0; i < config.maxIterations; i++) {
     if (signal?.aborted) return;
     const ranWithThink = thinkNext; // freeze the one-shot burst flag for this turn
@@ -237,6 +238,10 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
       }
       const result = typeof raw === "string" ? raw : raw.text; // a tool may return {text, image}
       const image = typeof raw === "string" ? undefined : raw.image;
+      // editing in circles (edit after edit, never checking or finishing) is another spin —
+      // any non-edit tool resets it; the nudge/stop below act on a long run.
+      if (name === "edit_file") editStreak++;
+      else editStreak = 0;
       toolCalls.push({ name, args, result });
       // accumulate deterministic state for a possible compaction (ground truth, no extra model call)
       toolLog.push(`${name} ${args.path || args.style || args.name || ""}`.trim());
@@ -345,6 +350,18 @@ export async function runAgent(config: AgentConfig, deps: RunAgentDeps): Promise
     if (checkAppStreak > 5) {
       onNotice?.("stopped: the model kept re-checking the app without changing anything — it can't make progress here. Iterate with a specific fix.");
       return;
+    }
+    // editing in circles — small edit after small edit, never verifying or finishing (a weak
+    // model can't land a hard change). Nudge it toward a different tack, then give up.
+    if (editStreak > 10) {
+      onNotice?.("stopped: the model kept editing the same file without finishing — it's likely stuck on this change. Iterate with a more specific instruction (or a different model).");
+      return;
+    }
+    if (editStreak === 5) {
+      messages.push({
+        role: "user",
+        content: "You've made several edits in a row without finishing. If it still isn't right, take a DIFFERENT approach — rewrite the whole file in one write_file — or call done if it's good enough. Don't keep making small repeated edits.",
+      });
     }
 
     // a turn with no tool calls and no done — nudge once (but not right after a reseed,

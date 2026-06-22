@@ -200,6 +200,14 @@ test("rate-limits then stops a check_app spin (weak model re-checks without ever
   assert.ok(notices.some((n) => /re-check/i.test(n)), "should surface why it stopped");
 });
 
+test("stops an edit_file spin (model edits the same file forever, never finishing)", async () => {
+  const engine = new FakeEngine([{ toolCalls: [tc("edit_file", { path: "index.html", old_string: "a", new_string: "b" })] }]);
+  const notices: string[] = [];
+  await runAgent(baseConfig({ maxIterations: 30 }), { engine, executor: new FakeExecutor(), onStep: () => {}, onNotice: (m) => notices.push(m) });
+  assert.ok(engine.callIndex < 30, `should give up on an edit spin, not run all 30 (ran ${engine.callIndex})`);
+  assert.ok(notices.some((n) => /editing/i.test(n)), "should surface why it stopped");
+});
+
 test("a real fix (edit_file) resets the check_app streak so check→fix→check is allowed", async () => {
   const engine = new FakeEngine([
     { toolCalls: [tc("write_file", { path: "index.html", content: "<html>x</html>" })] },
