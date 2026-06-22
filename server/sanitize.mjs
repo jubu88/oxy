@@ -148,6 +148,270 @@ export function repairModuleScripts(projectDir) {
   return fixes;
 }
 
+// ---- duplicate top-level class merge -------------------------------------------------
+// The #2 fatal failure we measured: a small model writes ONE component as TWO same-name
+// top-level `class X {…}` blocks (e.g. constructor/markup in one, methods in the other) →
+// "SyntaxError: Identifier 'X' has already been declared", which kills the whole file. The
+// model can't fix it (we watched 3 iterations across E2B + E4B fail). Two same-name classes
+// at the top level are ALWAYS invalid JS, and the model meant them as one — so merge the
+// bodies into a single class. Guarded both ways: we only act on a file that doesn't parse,
+// and only keep the merge if the result DOES parse — so a bad scan can never ship.
+
+const isWordChar = (ch) => !!ch && /[A-Za-z0-9_$]/.test(ch);
+
+// Strip ES-module syntax for a parse PROBE only (vm.Script can't handle import/export), so the
+// merge's safety-net parse-check works on module files (e.g. the Supabase ESM client) too.
+const neutralizeModule = (s) =>
+  s
+    .replace(/^[ \t]*import\b.*$/gm, "")
+    .replace(/^[ \t]*export\s+default\s+/gm, "")
+    .replace(/^[ \t]*export\s*\{[^}]*\}\s*;?[ \t]*$/gm, "")
+    .replace(/^[ \t]*export\s+/gm, "");
+
+// From an index pointing AT a string/template quote, return the index of its closing quote,
+// honoring escapes and (for templates) nested ${…} interpolation. Mutually recursive with
+// matchDelim so braces inside strings/templates never confuse brace matching.
+function skipString(code, i) {
+  const q = code[i];
+  if (q === "`") {
+    for (let j = i + 1; j < code.length; j++) {
+      const ch = code[j];
+      if (ch === "\\") { j++; continue; }
+      if (ch === "`") return j;
+      if (ch === "$" && code[j + 1] === "{") {
+        const close = matchDelim(code, j + 1);
+        if (close < 0) return code.length - 1;
+        j = close;
+      }
+    }
+    return code.length - 1;
+  }
+  for (let j = i + 1; j < code.length; j++) {
+    const ch = code[j];
+    if (ch === "\\") { j++; continue; }
+    if (ch === q) return j;
+    if (ch === "\n") return j - 1; // unterminated quote — stop before the newline (best-effort)
+  }
+  return code.length - 1;
+}
+
+// From an index pointing AT an opening {, ( or [, return the index of the matching close,
+// skipping strings, templates and comments. -1 if unbalanced.
+function matchDelim(code, open) {
+  const openCh = code[open];
+  const closeCh = openCh === "{" ? "}" : openCh === "(" ? ")" : openCh === "[" ? "]" : null;
+  if (!closeCh) return -1;
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    const c = code[i];
+    if (c === '"' || c === "'" || c === "`") { i = skipString(code, i); continue; }
+    if (c === "/" && code[i + 1] === "/") { const e = code.indexOf("\n", i); if (e < 0) return -1; i = e; continue; }
+    if (c === "/" && code[i + 1] === "*") { const e = code.indexOf("*/", i + 2); if (e < 0) return -1; i = e + 1; continue; }
+    if (c === openCh) depth++;
+    else if (c === closeCh) { if (--depth === 0) return i; }
+  }
+  return -1;
+}
+
+// Locate every TOP-LEVEL (depth-0) `class Name [extends …] { … }` declaration.
+function findTopLevelClasses(code) {
+  const classes = [];
+  let depth = 0;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === '"' || c === "'" || c === "`") { i = skipString(code, i); continue; }
+    if (c === "/" && code[i + 1] === "/") { const e = code.indexOf("\n", i); if (e < 0) break; i = e; continue; }
+    if (c === "/" && code[i + 1] === "*") { const e = code.indexOf("*/", i + 2); if (e < 0) break; i = e + 1; continue; }
+    if (c === "(" || c === "[") { const e = matchDelim(code, i); if (e < 0) break; i = e; continue; } // skip grouped exprs (and any anon class inside a call)
+    if (c === "{") { depth++; continue; }
+    if (c === "}") { depth--; continue; }
+    if (depth === 0 && code.startsWith("class", i) && !isWordChar(code[i - 1]) && !isWordChar(code[i + 5])) {
+      const m = /^class\s+([A-Za-z_$][\w$]*)\s*(extends\s+[^{]+?)?\s*\{/.exec(code.slice(i));
+      if (m) {
+        const braceIdx = i + m[0].length - 1;
+        const end = matchDelim(code, braceIdx);
+        if (end > 0) {
+          classes.push({ name: m[1], extendsClause: (m[2] || "").trim(), start: i, bodyStart: braceIdx + 1, bodyEnd: end, end: end + 1 });
+          i = end; // skip the whole class body
+          continue;
+        }
+      }
+    }
+  }
+  return classes;
+}
+
+// Find a class body's first depth-0 `constructor(…) { … }`; null if none.
+function findTopLevelCtor(body) {
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '"' || c === "'" || c === "`") { i = skipString(body, i); continue; }
+    if (c === "/" && body[i + 1] === "/") { const e = body.indexOf("\n", i); i = e < 0 ? body.length : e; continue; }
+    if (c === "/" && body[i + 1] === "*") { const e = body.indexOf("*/", i + 2); i = e < 0 ? body.length : e + 1; continue; }
+    if (c === "{") { depth++; continue; }
+    if (c === "}") { depth--; continue; }
+    if (depth === 0 && body.startsWith("constructor", i) && !isWordChar(body[i - 1]) && /[\s(]/.test(body[i + 11] || "")) {
+      const parenOpen = body.indexOf("(", i);
+      if (parenOpen < 0) return null;
+      const parenClose = matchDelim(body, parenOpen);
+      if (parenClose < 0) return null;
+      const bm = /^\s*\{/.exec(body.slice(parenClose + 1));
+      if (!bm) return null; // not a method (e.g. a `this.constructor()` field) — ignore
+      const braceOpen = parenClose + bm[0].length;
+      const braceClose = matchDelim(body, braceOpen);
+      if (braceClose < 0) return null;
+      return { start: i, end: braceClose + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Merge same-name top-level class declarations into one. PURE (unit-tested). Returns
+ * { code, fixes }. No-op unless the file genuinely fails to parse AND the merge makes it
+ * parse — so it never touches a working file and never ships a broken one.
+ */
+export function dedupeClasses(code) {
+  if (typeof code !== "string" || !code) return { code, fixes: [] };
+  if (!jsSyntaxError(neutralizeModule(code))) return { code, fixes: [] }; // already valid — never touch
+
+  const classes = findTopLevelClasses(code);
+  if (classes.length < 2) return { code, fixes: [] };
+  const byName = new Map();
+  for (const c of classes) (byName.get(c.name) || byName.set(c.name, []).get(c.name)).push(c);
+
+  const edits = [];
+  const fixes = [];
+  for (const [name, decls] of byName) {
+    if (decls.length < 2) continue;
+    let sawCtor = false;
+    const bodies = decls.map((d) => {
+      let body = code.slice(d.bodyStart, d.bodyEnd);
+      const ctor = findTopLevelCtor(body);
+      if (ctor && sawCtor) body = body.slice(0, ctor.start) + body.slice(ctor.end); // drop the 2nd+ constructor (else "may only have one constructor")
+      else if (ctor) sawCtor = true;
+      return body.trim();
+    });
+    const first = decls[0];
+    const header = `class ${name}${first.extendsClause ? " " + first.extendsClause : ""} {`;
+    edits.push({ start: first.start, end: first.end, text: `${header}\n  ${bodies.join("\n\n  ")}\n}` });
+    for (let k = 1; k < decls.length; k++) edits.push({ start: decls[k].start, end: decls[k].end, text: "" });
+    fixes.push(`merged ${decls.length} duplicate "class ${name}" declarations into one (the model split one class into separate blocks → "Identifier '${name}' has already been declared")`);
+  }
+  if (!edits.length) return { code, fixes: [] };
+
+  edits.sort((a, b) => b.start - a.start); // apply right-to-left so offsets stay valid
+  let out = code;
+  for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  out = out.replace(/\n{3,}/g, "\n\n");
+
+  if (jsSyntaxError(neutralizeModule(out))) return { code, fixes: [] }; // merge didn't actually fix it — bail, let verifyProject report
+  return { code: out, fixes };
+}
+
+/** Apply dedupeClasses to every top-level .js/.mjs/.cjs in a project IN PLACE. Returns the fixes. */
+export function mergeDuplicateClasses(projectDir) {
+  const fixes = [];
+  let files = [];
+  try {
+    files = fs.readdirSync(projectDir).filter((f) => /\.(js|mjs|cjs)$/i.test(f) && !f.startsWith(".codelab"));
+  } catch {
+    return fixes;
+  }
+  for (const f of files) {
+    const p = path.join(projectDir, f);
+    let src;
+    try {
+      src = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    const { code, fixes: ff } = dedupeClasses(src);
+    if (code !== src) {
+      try {
+        fs.writeFileSync(p, code, "utf8");
+        fixes.push(...ff.map((m) => `${f}: ${m}`));
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return fixes;
+}
+
+// ---- attributeChangedCallback signature repair --------------------------------------
+// The model often writes `attributeChangedCallback(changedAttributes, oldValue) { if
+// (changedAttributes.has('rating')) … }` — but the spec signature is
+// (name, oldValue, newValue) where `name` is the attribute name STRING, not a Set. So
+// `name.has(…)` throws a TypeError the moment a watched attribute changes (e.g. on a
+// click that calls this.setAttribute) → the component renders but never updates. The
+// first arg is ALWAYS a string here, so `firstParam.has('literal')` is unambiguously a
+// bug → rewrite it to `firstParam === 'literal'` (correct AND minimal). Parse-checked.
+
+const escapeReg = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Rewrite the buggy `<name>.has('attr')` pattern inside attributeChangedCallback. PURE. */
+export function repairAttrCallback(code) {
+  if (typeof code !== "string" || !code) return { code, fixes: [] };
+  const re = /\battributeChangedCallback\s*\(/g;
+  const edits = [];
+  let m;
+  while ((m = re.exec(code))) {
+    const parenOpen = m.index + m[0].length - 1;
+    const parenClose = matchDelim(code, parenOpen);
+    if (parenClose < 0) continue;
+    const firstParam = (code.slice(parenOpen + 1, parenClose).split(",")[0] || "").replace(/=.*$/s, "").trim();
+    if (!/^[A-Za-z_$][\w$]*$/.test(firstParam)) continue; // empty / destructured — can't safely rewrite
+    const bm = /^\s*\{/.exec(code.slice(parenClose + 1));
+    if (!bm) continue;
+    const braceOpen = parenClose + bm[0].length;
+    const braceClose = matchDelim(code, braceOpen);
+    if (braceClose < 0) continue;
+    const body = code.slice(braceOpen + 1, braceClose);
+    const hasRe = new RegExp(escapeReg(firstParam) + "\\s*\\.\\s*has\\s*\\(\\s*(['\"][^'\"]*['\"])\\s*\\)", "g");
+    const fixedBody = body.replace(hasRe, firstParam + " === $1");
+    if (fixedBody !== body) edits.push({ start: braceOpen + 1, end: braceClose, text: fixedBody });
+    re.lastIndex = braceClose; // don't rescan inside the body we just handled
+  }
+  if (!edits.length) return { code, fixes: [] };
+  edits.sort((a, b) => b.start - a.start);
+  let out = code;
+  for (const e of edits) out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  if (jsSyntaxError(neutralizeModule(out))) return { code, fixes: [] }; // never ship a broken rewrite
+  return { code: out, fixes: [`fixed attributeChangedCallback: its first argument is the attribute NAME (a string), not a Set — replaced .has('…') with === '…' so attribute changes (e.g. click-to-update) work`] };
+}
+
+/** Apply repairAttrCallback to every top-level .js/.mjs/.cjs in a project IN PLACE. */
+export function fixAttrCallbacks(projectDir) {
+  const fixes = [];
+  let files = [];
+  try {
+    files = fs.readdirSync(projectDir).filter((f) => /\.(js|mjs|cjs)$/i.test(f) && !f.startsWith(".codelab"));
+  } catch {
+    return fixes;
+  }
+  for (const f of files) {
+    const p = path.join(projectDir, f);
+    let src;
+    try {
+      src = fs.readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    const { code, fixes: ff } = repairAttrCallback(src);
+    if (code !== src) {
+      try {
+        fs.writeFileSync(p, code, "utf8");
+        fixes.push(...ff.map((msg) => `${f}: ${msg}`));
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return fixes;
+}
+
 /**
  * Wire a real Supabase project into generated FRONTEND code: replace whatever value is assigned
  * to SUPABASE_URL / SUPABASE_ANON_KEY (and a direct createClient("url","key") call) with the
@@ -237,7 +501,11 @@ export function verifyProject(projectDir) {
     // skip ES modules — vm.Script can't parse import/export and that's legitimate
     if (/^\s*(import|export)\b/m.test(code)) continue;
     const err = jsSyntaxError(code);
-    if (err) issues.push(`${f} has a JavaScript syntax error: ${err}`);
+    if (err) {
+      const dup = /Identifier '(.+?)' has already been declared/.exec(err);
+      if (dup) issues.push(`${f}: "${dup[1]}" is declared more than once at the top level — you split one definition into duplicate blocks. Merge them into a SINGLE \`class ${dup[1]}\` (or one const/let) so the file parses.`);
+      else issues.push(`${f} has a JavaScript syntax error: ${err}`);
+    }
   }
 
   if (idx) {

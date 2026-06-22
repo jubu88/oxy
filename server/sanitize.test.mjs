@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig, dedupeClasses, mergeDuplicateClasses, repairAttrCallback, fixAttrCallbacks } from "./sanitize.mjs";
 
 // ---- sanitizeFileContent (pure) ----
 
@@ -219,5 +219,152 @@ test("injectSupabaseConfig is a no-op when the project isn't configured", () => 
   const dir = tmpProject({ "app.js": `const SUPABASE_URL = "x";` });
   assert.deepEqual(injectSupabaseConfig(dir, "", ""), []);
   assert.equal(fs.readFileSync(path.join(dir, "app.js"), "utf8"), `const SUPABASE_URL = "x";`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---- dedupeClasses / mergeDuplicateClasses (the duplicate-class bug) ----
+
+test("dedupeClasses merges a component split into two same-name class blocks (the live StarRating bug)", () => {
+  // exactly the shape that failed 3 iterations: constructor/markup in one block, methods in the other,
+  // and the first block styles via a template literal FULL of { } (which must not confuse brace matching)
+  const code =
+    "class StarRating extends HTMLElement {\n" +
+    "  constructor() { super(); this.attachShadow({ mode: 'open' }); this.shadowRoot.innerHTML = `<style>.s{color:red} .t{margin:0}</style><div id=\"d\"></div>`; }\n" +
+    "}\n\n" +
+    "class StarRating extends HTMLElement {\n" +
+    "  connectedCallback() { this.render(); }\n" +
+    "  render() { this.shadowRoot.getElementById('d').textContent = 'hi'; }\n" +
+    "}\n\n" +
+    "customElements.define('star-rating', StarRating);";
+  const { code: out, fixes } = dedupeClasses(code);
+  assert.equal(fixes.length, 1, "should report one merge");
+  assert.equal((out.match(/class StarRating\b/g) || []).length, 1, "exactly one class remains");
+  assert.match(out, /constructor\(\)/); // first half kept
+  assert.match(out, /connectedCallback\(\)/); // second half kept
+  assert.match(out, /render\(\)/);
+  assert.match(out, /attachShadow/);
+  assert.match(out, /customElements\.define\('star-rating', StarRating\)/); // tail untouched
+  // dedupeClasses only returns changed code when the result parses, so reaching here = valid JS
+});
+
+test("dedupeClasses drops the 2nd constructor when BOTH blocks declare one (else 'may only have one constructor')", () => {
+  const code =
+    "class S extends HTMLElement { constructor(){ super(); this.a = 1; } foo(){ return 1; } }\n" +
+    "class S extends HTMLElement { constructor(){ super(); this.b = 2; } bar(){ return 2; } }\n" +
+    "customElements.define('s-x', S);";
+  const { code: out, fixes } = dedupeClasses(code);
+  assert.equal(fixes.length, 1);
+  assert.equal((out.match(/class S\b/g) || []).length, 1);
+  assert.equal((out.match(/constructor\s*\(/g) || []).length, 1, "only one constructor survives");
+  assert.match(out, /this\.a = 1/); // first constructor kept
+  assert.match(out, /foo\(\)/);
+  assert.match(out, /bar\(\)/); // both method halves kept
+});
+
+test("dedupeClasses leaves a valid single-class file untouched (never touches working code)", () => {
+  const code = `class S extends HTMLElement { connectedCallback(){} }\ncustomElements.define("s-y", S);`;
+  assert.deepEqual(dedupeClasses(code), { code, fixes: [] });
+});
+
+test("dedupeClasses does not merge two DIFFERENT-name classes", () => {
+  const code = `class A extends HTMLElement {}\nclass B extends HTMLElement {}\ncustomElements.define("a-x", A);`;
+  assert.deepEqual(dedupeClasses(code), { code, fixes: [] });
+});
+
+test("dedupeClasses ignores a nested same-name class (only top-level redeclarations are the bug)", () => {
+  const code = `class S {}\nfunction f(){ class S {} return S; }\nnew f();`;
+  assert.deepEqual(dedupeClasses(code), { code, fixes: [] }); // valid JS — no top-level redeclaration
+});
+
+test("mergeDuplicateClasses fixes a duplicate-class file on disk and clears the verify error", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    "app.js":
+      `class StarRating extends HTMLElement { constructor(){ super(); this.attachShadow({mode:'open'}); } }\n` +
+      `class StarRating extends HTMLElement { connectedCallback(){} }\n` +
+      `customElements.define("star-rating", StarRating);`,
+  });
+  // before: the duplicate makes the file unparseable
+  assert.ok(verifyProject(dir).some((i) => /declared more than once|already been declared/i.test(i)));
+  const fixes = mergeDuplicateClasses(dir);
+  assert.equal(fixes.length, 1);
+  const out = fs.readFileSync(path.join(dir, "app.js"), "utf8");
+  assert.equal((out.match(/class StarRating\b/g) || []).length, 1);
+  // after: no syntax error, element still placed → renders
+  assert.deepEqual(verifyProject(dir).filter((i) => /declared|syntax error/i.test(i)), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("mergeDuplicateClasses no-ops a clean project", () => {
+  const dir = tmpProject({ "app.js": `class S extends HTMLElement {}\ncustomElements.define("s-z", S);` });
+  assert.deepEqual(mergeDuplicateClasses(dir), []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyProject gives a directive 'declared more than once' message (fallback when merge can't run)", () => {
+  const dir = tmpProject({ "index.html": `<script src="app.js"></script>`, "app.js": `class StarRating {}\nclass StarRating {}` });
+  const issues = verifyProject(dir);
+  assert.ok(issues.some((i) => /StarRating.*declared more than once|merge them into a single/i.test(i)), issues.join(" | "));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---- repairAttrCallback / fixAttrCallbacks (the click-throws WC bug) ----
+
+test("repairAttrCallback rewrites name.has('attr') -> name === 'attr' (the live click-throws bug)", () => {
+  const code =
+    "class S extends HTMLElement {\n" +
+    "  static get observedAttributes(){ return ['rating','max']; }\n" +
+    "  attributeChangedCallback(changedAttributes, oldValue) {\n" +
+    "    if (changedAttributes.has('rating') || changedAttributes.has('max')) { this.updateRating(); }\n" +
+    "  }\n" +
+    "}\n";
+  const { code: out, fixes } = repairAttrCallback(code);
+  assert.equal(fixes.length, 1);
+  assert.match(out, /changedAttributes === 'rating'/);
+  assert.match(out, /changedAttributes === 'max'/);
+  assert.doesNotMatch(out, /\.has\(/);
+});
+
+test("repairAttrCallback no-ops a correct callback (name === 'attr')", () => {
+  const code = `class S extends HTMLElement { attributeChangedCallback(name, o, n){ if (name === 'rating') this.r(); } }`;
+  assert.deepEqual(repairAttrCallback(code), { code, fixes: [] });
+});
+
+test("repairAttrCallback no-ops when the first param is destructured (can't safely rewrite)", () => {
+  const code = `class S { attributeChangedCallback({ name }, o, n){ const s = new Set(); if (s.has('x')) {} } }`;
+  assert.deepEqual(repairAttrCallback(code), { code, fixes: [] });
+});
+
+test("repairAttrCallback only touches the first param's .has, not a real Set elsewhere in the body", () => {
+  const code =
+    "class S { attributeChangedCallback(name, o, n){ const seen = new Set(['rating']); if (name.has('rating') && seen.has('rating')) this.r(); } }";
+  const { code: out, fixes } = repairAttrCallback(code);
+  assert.equal(fixes.length, 1);
+  assert.match(out, /name === 'rating'/); // the bug, fixed
+  assert.match(out, /seen\.has\('rating'\)/); // the real Set, untouched
+});
+
+test("fixAttrCallbacks fixes the file on disk and the result parses", () => {
+  const dir = tmpProject({
+    "index.html": `<star-rating></star-rating><script src="app.js"></script>`,
+    "app.js":
+      `class StarRating extends HTMLElement {\n` +
+      `  static get observedAttributes(){ return ['rating']; }\n` +
+      `  attributeChangedCallback(attrs, oldV){ if (attrs.has('rating')) this.updateRating(); }\n` +
+      `  updateRating(){}\n` +
+      `}\n` +
+      `customElements.define('star-rating', StarRating);`,
+  });
+  const fixes = fixAttrCallbacks(dir);
+  assert.equal(fixes.length, 1);
+  const out = fs.readFileSync(path.join(dir, "app.js"), "utf8");
+  assert.match(out, /attrs === 'rating'/);
+  assert.deepEqual(verifyProject(dir).filter((i) => /syntax error/i.test(i)), []); // still valid JS
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("fixAttrCallbacks no-ops a clean project", () => {
+  const dir = tmpProject({ "app.js": `class S extends HTMLElement { connectedCallback(){} }\ncustomElements.define("s-z", S);` });
+  assert.deepEqual(fixAttrCallbacks(dir), []);
   fs.rmSync(dir, { recursive: true, force: true });
 });

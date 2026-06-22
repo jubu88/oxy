@@ -18,7 +18,7 @@ import { shouldAutoPromote } from "./auto-promote.mjs";
 import { parseAutoPromoteLog, autoLearnProgress } from "./autolearn.mjs";
 import { modelKey, maxStepsFor } from "../skillopt/model-config.mjs";
 import { getReference, libraryHint } from "./reference.mjs";
-import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig } from "./sanitize.mjs";
+import { sanitizeFileContent, sanitizeProject, verifyProject, repairModuleScripts, injectSupabaseConfig, mergeDuplicateClasses, fixAttrCallbacks } from "./sanitize.mjs";
 
 // vision model used to critique rendered designs. gemma4:e4b's vision is too weak
 // (it hallucinated on test images), so default to a dedicated small VLM. moondream
@@ -1129,6 +1129,12 @@ export async function codelabHandler(req, res, next) {
         if (iterate) {
           const swept = sanitizeProject(path.join(PROJECTS, project));
           if (swept.length) send({ type: "status", message: `auto-repaired ${swept.length} file(s): ${swept.join(" · ")}` });
+          // heal a duplicate-class file (two same-name top-level classes → "already been declared")
+          // BEFORE the model iterates, so it edits valid code instead of thrashing on the syntax error.
+          const merged = mergeDuplicateClasses(path.join(PROJECTS, project));
+          if (merged.length) send({ type: "status", message: `auto-repaired: ${merged.join(" · ")}` });
+          const cbFixed = fixAttrCallbacks(path.join(PROJECTS, project));
+          if (cbFixed.length) send({ type: "status", message: `auto-repaired: ${cbFixed.join(" · ")}` });
         }
         const executor = new HttpToolExecutor({ baseUrl });
         // use the deployed (e.g. SkillOpt-tuned) skill if present — unless the user
@@ -1217,6 +1223,13 @@ export async function codelabHandler(req, res, next) {
         // module or the whole app's JS dies on load — fix it instead of hoping the model does
         // (it shipped exactly this with the Supabase ESM client). Runs for fresh + iterate builds.
         if (!ac.signal.aborted) {
+          // a component written as TWO same-name top-level classes is fatal JS the model can't
+          // self-fix — merge the split halves into one class (deterministic, parse-checked).
+          const classFixes = mergeDuplicateClasses(path.join(PROJECTS, project));
+          if (classFixes.length) send({ type: "status", message: `auto-repaired: ${classFixes.join(" · ")}` });
+          // fix a buggy attributeChangedCallback (treats the name string as a Set → click throws)
+          const cbFixes = fixAttrCallbacks(path.join(PROJECTS, project));
+          if (cbFixes.length) send({ type: "status", message: `auto-repaired: ${cbFixes.join(" · ")}` });
           const moduleFixes = repairModuleScripts(path.join(PROJECTS, project));
           if (moduleFixes.length) send({ type: "status", message: `auto-repaired: ${moduleFixes.join(" · ")}` });
           // wire the user's real Supabase project (URL + anon key) into the generated frontend,

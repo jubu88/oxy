@@ -23,7 +23,7 @@ import { scoreProject, type Task } from "./score.ts";
 import { journalDigest, markAllConsumed, unconsumedCount } from "./supervisor.ts";
 import { modelKey } from "./model-config.mjs";
 import { libraryHint } from "../server/reference.mjs";
-import { repairModuleScripts } from "../server/sanitize.mjs";
+import { repairModuleScripts, mergeDuplicateClasses, fixAttrCallbacks } from "../server/sanitize.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -155,7 +155,9 @@ async function main() {
     }
     const finished = steps.at(-1)?.done ?? false;
     const projectDir = path.join(REPO, "workspace", "projects", project);
-    repairModuleScripts(projectDir); // same deterministic repair the build endpoint runs, before scoring
+    mergeDuplicateClasses(projectDir); // same deterministic repairs the build endpoint runs, before scoring
+    fixAttrCallbacks(projectDir);
+    repairModuleScripts(projectDir);
     const { score, breakdown } = await scoreProject(projectDir, task, { finished });
     return { score, breakdown };
   };
